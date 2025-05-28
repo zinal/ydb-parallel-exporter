@@ -1,5 +1,6 @@
 package tech.ydb.samples.exporter;
 
+import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -25,6 +26,7 @@ public class ExporterApp implements Runnable, AutoCloseable {
     private final AtomicBoolean shouldRun = new AtomicBoolean(false);
     private final AtomicReference<ExecutorService> es = new AtomicReference<>();
     private final AtomicLong numberOfJobsScheduled = new AtomicLong(0);
+    private final ArrayList<Throwable> jobFailures = new ArrayList<>();
 
     public ExporterApp(YdbConnector yc, ExporterJob job) {
         this.yc = yc;
@@ -42,7 +44,7 @@ public class ExporterApp implements Runnable, AutoCloseable {
 
     @Override
     public void run() {
-        if (shouldRun.get()) {
+        if (shouldRun.get() || es.get() != null) {
             throw new IllegalStateException("Already running");
         }
         shouldRun.set(true);
@@ -53,6 +55,8 @@ public class ExporterApp implements Runnable, AutoCloseable {
         } else {
             mainSingleRead();
         }
+        waitJobs();
+        LOG.info("Parallel exporter job completed.");
     }
     
     private void initExecutors() {
@@ -76,16 +80,52 @@ public class ExporterApp implements Runnable, AutoCloseable {
         }
     }
     
+    private void waitJobs() {
+        while (numberOfJobsScheduled.get() > 0L) {
+            boolean hasFailures;
+            synchronized(jobFailures) {
+                hasFailures = (!jobFailures.isEmpty());
+            }
+            if (hasFailures) {
+                reportFailures();
+                throw new RuntimeException("At least one of sub-jobs failed");
+            }
+            sleepMillis(50L);
+        }
+    }
+    
+    private boolean reportFailures() {
+        final ArrayList<Throwable> errors;
+        synchronized(jobFailures) {
+            errors = new ArrayList<>(jobFailures);
+            jobFailures.clear();
+        }
+        if (errors.isEmpty()) {
+            return false;
+        }
+        LOG.info("*** Total {} sub-job failures detected.", errors.size());
+        // TODO: group relevant messages and report
+        return true;
+    }
+
+    private void sleepMillis(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch(InterruptedException ix) {
+            Thread.currentThread().interrupt();
+        }
+    }
+    
     private void mainPagedRead() {
         LOG.info("Performing paged reads for the main query.");
         
     }
-    
+
     private void mainSingleRead() {
         LOG.info("Performing single-action read for the main query.");
         try (QuerySession qs = yc.createQuerySession()) {
             qs.createQuery(job.getMainQuery(), TxMode.SNAPSHOT_RO)
-                    .execute(part -> es.get().submit(new PartWorker(part.getResultSetReader())))
+                    .execute(part -> submitPart(part.getResultSetReader()))
                     .join()
                     .getStatus()
                     .expectSuccess("Main query failed");
@@ -93,11 +133,20 @@ public class ExporterApp implements Runnable, AutoCloseable {
         LOG.info("Main query completed.");
     }
     
-    private void processPart(ResultSetReader input) {
-        
+    private void submitPart(ResultSetReader rsr) {
+        if (shouldRun.get()) {
+            es.get().submit(new PartWorker(rsr));
+        }
     }
-    
+
     private void processException(Throwable ex) {
+        shouldRun.set(false);
+        synchronized(jobFailures) {
+            jobFailures.add(ex);
+        }
+    }
+
+    private void processPart(ResultSetReader input) {
         
     }
 
