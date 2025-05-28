@@ -1,34 +1,32 @@
 package tech.ydb.samples.exporter;
 
-import java.time.Duration;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import tech.ydb.common.transaction.TxMode;
-import tech.ydb.core.Result;
 import tech.ydb.query.QuerySession;
-import tech.ydb.query.result.QueryInfo;
-import tech.ydb.query.result.QueryResultPart;
+import tech.ydb.table.result.ResultSetReader;
 
 /**
  *
  * @author zinal
  */
-public class App implements Runnable, AutoCloseable {
+public class ExporterApp implements Runnable, AutoCloseable {
 
-    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(App.class);
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(ExporterApp.class);
     
     private final YdbConnector yc;
     private final ExporterJob job;
 
     private final AtomicBoolean shouldRun = new AtomicBoolean(false);
     private final AtomicReference<ExecutorService> es = new AtomicReference<>();
+    private final AtomicLong numberOfJobsScheduled = new AtomicLong(0);
 
-    public App(YdbConnector yc, ExporterJob job) {
+    public ExporterApp(YdbConnector yc, ExporterJob job) {
         this.yc = yc;
         this.job = job;
     }
@@ -87,16 +85,20 @@ public class App implements Runnable, AutoCloseable {
         LOG.info("Performing single-action read for the main query.");
         try (QuerySession qs = yc.createQuerySession()) {
             qs.createQuery(job.getMainQuery(), TxMode.SNAPSHOT_RO)
-                    .execute(part -> handleMainPart(part))
+                    .execute(part -> es.get().submit(new PartWorker(part.getResultSetReader())))
                     .join()
                     .getStatus()
                     .expectSuccess("Main query failed");
         }
         LOG.info("Main query completed.");
     }
-
-    private void handleMainPart(QueryResultPart part) {
-        throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
+    
+    private void processPart(ResultSetReader input) {
+        
+    }
+    
+    private void processException(Throwable ex) {
+        
     }
 
     public static void main(String[] args) {
@@ -108,7 +110,7 @@ public class App implements Runnable, AutoCloseable {
             YdbConnector.Config ycc = YdbConnector.Config.fromFile(args[0]);
             ExporterJob job = ExporterJob.fromXml(args[1]);
             try (YdbConnector yc = new YdbConnector(ycc)) {
-                try (App app = new App(yc, job)) {
+                try (ExporterApp app = new ExporterApp(yc, job)) {
                     app.run();
                 }
             }
@@ -117,4 +119,22 @@ public class App implements Runnable, AutoCloseable {
         }
     }
 
+    private class PartWorker implements Runnable {
+        private final ResultSetReader rsr;
+
+        public PartWorker(ResultSetReader rsr) {
+            this.rsr = rsr;
+            numberOfJobsScheduled.incrementAndGet();
+        }
+
+        @Override
+        public void run() {
+            try {
+                processPart(rsr);
+            } catch(Exception ex) {
+                processException(ex);
+            }
+            numberOfJobsScheduled.decrementAndGet();
+        }
+    }
 }
