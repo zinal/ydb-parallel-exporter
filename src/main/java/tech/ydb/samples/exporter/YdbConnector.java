@@ -4,14 +4,15 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.Properties;
 import tech.ydb.auth.iam.CloudAuthHelper;
 import tech.ydb.core.auth.StaticCredentials;
 import tech.ydb.core.grpc.GrpcTransport;
 import tech.ydb.core.grpc.GrpcTransportBuilder;
 import tech.ydb.query.QueryClient;
+import tech.ydb.query.QuerySession;
 import tech.ydb.scheme.SchemeClient;
-import tech.ydb.topic.TopicClient;
 
 /**
  * The helper class which creates the YDB connection from the set of properties.
@@ -24,7 +25,6 @@ public class YdbConnector implements AutoCloseable {
 
     private final GrpcTransport transport;
     private final QueryClient queryClient;
-    private final TopicClient topicClient;
     private final SchemeClient schemeClient;
     private final String database;
     private final Config config;
@@ -71,7 +71,6 @@ public class YdbConnector implements AutoCloseable {
                     .sessionPoolMinSize(1)
                     .sessionPoolMaxSize(config.getPoolSize())
                     .build();
-            this.topicClient = TopicClient.newClient(tempTransport).build();
             this.schemeClient = SchemeClient.newClient(tempTransport).build();
             this.transport = tempTransport;
             tempTransport = null; // to avoid closing below
@@ -107,16 +106,17 @@ public class YdbConnector implements AutoCloseable {
         return queryClient;
     }
 
-    public TopicClient getTopicClient() {
-        return topicClient;
-    }
-
     public SchemeClient getSchemeClient() {
         return schemeClient;
     }
 
     public String getDatabase() {
         return database;
+    }
+    
+    public QuerySession createQuerySession() {
+        return queryClient.createSession(Duration.ofSeconds(60))
+                .join().getValue();
     }
 
     @Override
@@ -136,13 +136,6 @@ public class YdbConnector implements AutoCloseable {
                 LOG.warn("SchemeClient closing threw an exception", ex);
             }
         }
-        if (topicClient != null) {
-            try {
-                topicClient.close();
-            } catch (Exception ex) {
-                LOG.warn("TopicClient closing threw an exception", ex);
-            }
-        }
         if (transport != null) {
             try {
                 transport.close();
@@ -153,6 +146,15 @@ public class YdbConnector implements AutoCloseable {
         LOG.info("Disconnected from YDB.");
     }
 
+    /**
+    * Configuration class for YDB database connections.
+    * It holds various properties for connection strings, authentication settings,
+    * TLS certificate files, connection pool size, and a prefix used for property lookups.
+    * The configuration can be initialized with or without a set of Java Properties,
+    * optionally using a custom prefix for property names.
+    * A static method provided by the class allows loading configuration
+    * from an external XML properties file.
+    */
     public static final class Config {
 
         private String connectionString;
@@ -191,10 +193,28 @@ public class YdbConnector implements AutoCloseable {
             this.properties.putAll(props);
         }
 
+        /**
+        * Loads a configuration from the specified file.
+        * This is a convenience method that delegates to the overloaded version
+        * without an explicit property name prefix parameter.
+        *
+        * @param fname the file path to load the configuration from
+        * @return the parsed configuration object
+        */
         public static Config fromFile(String fname) {
             return fromFile(fname, null);
         }
 
+        /**
+         * Reads and parses a configuration file into a {@link Config} object.
+         * The file is read as bytes, then parsed as XML properties.
+         * A custom prefix for property names can be applied during configuration processing.
+         *
+         * @param fname the path to the configuration file
+         * @param prefix the custom prefix for property names to be read when constructing the Config object
+         * @return a new {@link Config} object loaded with the specified properties
+         * @throws RuntimeException if the file cannot be read or parsed
+         */
         public static Config fromFile(String fname, String prefix) {
             byte[] data;
             try {
@@ -283,12 +303,30 @@ public class YdbConnector implements AutoCloseable {
 
     }
 
+    /** 
+     * Supported authentication modes for YDB connections.
+     */
     public static enum AuthMode {
 
+        /**
+         * No authentication.
+         */
         NONE,
+        /**
+         * Authentication via environment variables.
+         */
         ENV,
+        /**
+         * Authentication via static credentials, e.g. login+password.
+         */
         STATIC,
+        /**
+         * Authentication via virtual machine metadata.
+         */
         METADATA,
+        /**
+         * Authentication via service account key file.
+         */
         SAKEY
 
     }
