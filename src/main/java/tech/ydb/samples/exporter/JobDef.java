@@ -10,14 +10,16 @@ import java.io.Serializable;
  *
  * @author mzinal
  */
-public class ExporterJob implements Serializable {
+public class JobDef implements Serializable {
 
     private int workerCount = 1;
     private boolean useMainQueryPaging = false;
     private String mainQuery = null;
     private String subQuery = null;
+    private Format outputFormat = Format.CSV;
+    private String outputFile = "-"; // stdout
     
-    public ExporterJob() {
+    public JobDef() {
     }
 
     public int getWorkerCount() {
@@ -52,16 +54,38 @@ public class ExporterJob implements Serializable {
         this.subQuery = subQuery;
     }
 
-    public static ExporterJob fromXml(String fname) throws IOException {
+    public Format getOutputFormat() {
+        return outputFormat;
+    }
+
+    public void setOutputFormat(Format outputFormat) {
+        this.outputFormat = outputFormat;
+    }
+
+    public String getOutputFile() {
+        return outputFile;
+    }
+
+    public void setOutputFile(String outputFile) {
+        this.outputFile = outputFile;
+    }
+
+    public static JobDef fromXml(String fname) throws IOException {
         return fromXml(new FileInputStream(fname));
     }
     
-    public static ExporterJob fromXml(byte[] input) throws IOException {
+    public static JobDef fromXml(byte[] input) throws IOException {
         return fromXml(new ByteArrayInputStream(input));
     }
     
-    public static ExporterJob fromXml(InputStream input) throws IOException {
-        return new ExporterJob();
+    public static JobDef fromXml(InputStream input) throws IOException {
+        return new JobDef();
+    }
+    
+    public static enum Format {
+        CSV,
+        TSV,
+        JSON
     }
     
 }
