@@ -5,6 +5,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Serializable;
+import java.util.ArrayList;
 
 /**
  *
@@ -15,7 +16,9 @@ public class JobDef implements Serializable {
     private int workerCount = 1;
     private boolean useMainQueryPaging = false;
     private String mainQuery = null;
-    private String subQuery = null;
+    private final ArrayList<String> mainInput = new ArrayList<>();
+    private String detailsQuery = null;
+    private final ArrayList<String> detailsInput = new ArrayList<>();
     private Format outputFormat = Format.CSV;
     private String outputFile = "-"; // stdout
     
@@ -46,12 +49,20 @@ public class JobDef implements Serializable {
         this.mainQuery = mainQuery;
     }
 
-    public String getSubQuery() {
-        return subQuery;
+    public ArrayList<String> getMainInput() {
+        return mainInput;
     }
 
-    public void setSubQuery(String subQuery) {
-        this.subQuery = subQuery;
+    public String getDetailsQuery() {
+        return detailsQuery;
+    }
+
+    public void setDetailsQuery(String subQuery) {
+        this.detailsQuery = subQuery;
+    }
+
+    public ArrayList<String> getDetailsInput() {
+        return detailsInput;
     }
 
     public Format getOutputFormat() {

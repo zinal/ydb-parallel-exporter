@@ -179,7 +179,7 @@ public class Tool implements Runnable, AutoCloseable {
         LOG.info("Performing single-action read for the main query.");
         try (QuerySession qs = yc.createQuerySession()) {
             qs.createQuery(job.getMainQuery(), TxMode.SNAPSHOT_RO)
-                    .execute(part -> submitPart(part.getResultSetReader()))
+                    .execute(part -> submitMainPart(part.getResultSetReader()))
                     .join()
                     .getStatus()
                     .expectSuccess("Main query failed");
@@ -187,7 +187,7 @@ public class Tool implements Runnable, AutoCloseable {
         LOG.info("Main query completed.");
     }
     
-    private void submitPart(ResultSetReader rsr) {
+    private void submitMainPart(ResultSetReader rsr) {
         if (shouldRun.get()) {
             es.get().submit(new PartWorker(rsr));
         }
@@ -200,7 +200,17 @@ public class Tool implements Runnable, AutoCloseable {
         }
     }
 
-    private void processPart(ResultSetReader input) {
+    private void processMainPart(ResultSetReader input) {
+        Value<?>[] rows;
+        if (job.getDetailsInput().isEmpty()) {
+            rows = collectMainKeys1(input);
+        } else {
+            rows = collectMainKeys2(input);
+        }
+        grabDetails(ListValue.of(rows));
+    }
+
+    private Value<?>[] collectMainKeys1(ResultSetReader input) {
         Value<?>[] rows = new StructValue[input.getRowCount()];
         int rownum = 0;
         while (input.next()) {
@@ -210,27 +220,51 @@ public class Tool implements Runnable, AutoCloseable {
             }
             rows[rownum++] = StructValue.of(m);
         }
-        processPart(ListValue.of(rows));
+        return rows;
     }
 
-    private void processPart(ListValue input) {
-        String query = job.getSubQuery();
+    private Value<?>[] collectMainKeys2(ResultSetReader input) {
+        Value<?>[] rows = new StructValue[input.getRowCount()];
+        int[] indexes = new int[job.getDetailsInput().size()];
+        for (int ix = 0; ix < job.getDetailsInput().size(); ++ix) {
+            String column = job.getDetailsInput().get(ix);
+            indexes[ix] = input.getColumnIndex(column);
+            if (indexes[ix] < 0) {
+                LOG.warn("Missing column {} in main query output", column);
+            }
+        }
+        int rownum = 0;
+        while (input.next()) {
+            HashMap<String, Value<?>> m = new HashMap<>();
+            for (int ix = 0; ix < indexes.length; ++ix) {
+                if (indexes[ix] > 0) {
+                    int index = indexes[ix];
+                    m.put(input.getColumnName(index), input.getColumn(index).getValue());
+                }
+            }
+            rows[rownum++] = StructValue.of(m);
+        }
+        return rows;
+    }
+
+    private void grabDetails(ListValue input) {
+        String query = job.getDetailsQuery();
         Params params = Params.of("$input", input);
         QueryReader result = retryCtx.supplyResult(
                 session -> QueryReader.readFrom(
                         session.createQuery(query, TxMode.SERIALIZABLE_RW, params))
         ).join().getValue();
-        pushRecordsToOutput(result);
+        pushDetailsToOutput(result);
     }
 
-    private void pushRecordsToOutput(QueryReader output) {
+    private void pushDetailsToOutput(QueryReader output) {
         for (int i = 0; i < output.getResultSetCount(); ++i) {
             ResultSetReader rsr = output.getResultSet(i);
-            pushRecordsToOutput(rsr);
+            pushDetailsToOutput(rsr);
         }
     }
 
-    private void pushRecordsToOutput(ResultSetReader output) {
+    private void pushDetailsToOutput(ResultSetReader output) {
         if (output.getRowCount() < 1) {
             return;
         }
@@ -392,7 +426,7 @@ public class Tool implements Runnable, AutoCloseable {
         @Override
         public void run() {
             try {
-                processPart(rsr);
+                processMainPart(rsr);
             } catch(Exception ex) {
                 processException(ex);
             }
