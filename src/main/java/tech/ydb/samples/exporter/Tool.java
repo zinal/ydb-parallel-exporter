@@ -173,6 +173,7 @@ public class Tool implements Runnable, AutoCloseable {
     private void mainPagedRead() {
         LOG.info("Performing paged reads for the main query.");
         
+        LOG.info("Main query completed.");
     }
 
     private void mainSingleRead() {
@@ -226,7 +227,7 @@ public class Tool implements Runnable, AutoCloseable {
     private Value<?>[] collectMainKeys2(ResultSetReader input) {
         Value<?>[] rows = new StructValue[input.getRowCount()];
         int[] indexes = new int[job.getDetailsInput().size()];
-        for (int ix = 0; ix < job.getDetailsInput().size(); ++ix) {
+        for (int ix = 0; ix < indexes.length; ++ix) {
             String column = job.getDetailsInput().get(ix);
             indexes[ix] = input.getColumnIndex(column);
             if (indexes[ix] < 0) {
@@ -287,28 +288,28 @@ public class Tool implements Runnable, AutoCloseable {
         LOG.info("Dropping the batch of {} records due to shutdown.", output.getRowCount());
     }
     
-    private String formatHeader(String[] columns) {
-        if (JobDef.Format.JSON.equals(job.getOutputFormat())) {
-            return null;
+    private CharSequence formatJson(ArrayList<String[]> block) {
+        if (block.size() <= 1) {
+            return "";
         }
         final StringBuilder sb = new StringBuilder();
-        try {
-            CSVPrinter cp;
-            if (JobDef.Format.TSV.equals(job.getOutputFormat())) {
-                cp = new CSVPrinter(sb, CSVFormat.POSTGRESQL_TEXT);
-            } else {
-                cp = new CSVPrinter(sb, CSVFormat.POSTGRESQL_CSV);
+        String[] columns = block.get(0);
+        final HashMap<String,String> m = new HashMap<>();
+        for (int i=1; i<block.size(); ++i) {
+            m.clear();
+            String[] values = block.get(i);
+            for (int j=0; j<columns.length && j<values.length; ++j) {
+                m.put(columns[j], values[j]);
             }
-            cp.printRecord(Arrays.asList(columns));
-        } catch(IOException iox) {
-            throw new RuntimeException("Failed to format CSV header", iox);
+            gson.toJson(m, sb);
+            sb.append("\n");
         }
-        return sb.toString();
+        return sb;
     }
     
-    private String formatRow(String[] columns, String[] values) {
-        if (JobDef.Format.JSON.equals(job.getOutputFormat())) {
-            return formatJsonRow(columns, values);
+    private CharSequence formatCsv(boolean first, ArrayList<String[]> block) {
+        if (block.size() <= 1) {
+            return "";
         }
         final StringBuilder sb = new StringBuilder();
         try {
@@ -318,21 +319,18 @@ public class Tool implements Runnable, AutoCloseable {
             } else {
                 cp = new CSVPrinter(sb, CSVFormat.POSTGRESQL_CSV);
             }
-            cp.printRecord(Arrays.asList(values));
+            if (first) {
+                cp.printRecord(Arrays.asList(block.get(0)));
+            }
+            for (int i=1; i<block.size(); ++i) {
+                cp.printRecord(Arrays.asList(block.get(i)));
+            }
         } catch(IOException iox) {
-            throw new RuntimeException("Failed to format CSV record", iox);
+            throw new RuntimeException("Failed to format CSV block", iox);
         }
-        return sb.toString();
+        return sb;
     }
 
-    private String formatJsonRow(String[] columns, String[] values) {
-        final HashMap<String,String> m = new HashMap<>();
-        for (int i=0; i<columns.length && i<values.length; ++i) {
-            m.put(columns[i], values[i]);
-        }
-        return gson.toJson(m) + "\n";
-    }
-    
     public static void main(String[] args) {
         if (args.length != 2) {
             System.out.println("USAGE: App connection.xml job.xml");
@@ -397,18 +395,16 @@ public class Tool implements Runnable, AutoCloseable {
                 if (block==null || block.isEmpty()) {
                     break;
                 }
-                String v;
-                if (first) {
-                    v = formatHeader(block.get(0));
-                    if (v!=null && v.length() > 0) {
-                        writer.append(v);
-                    }
+                CharSequence v;
+                if (JobDef.Format.JSON.equals(job.getOutputFormat())) {
+                    v = formatCsv(first, block);
+                } else {
+                    v = formatJson(block);
                 }
-                first = false;
-                for (int i=1; i<block.size(); ++i) {
-                    v = formatRow(block.get(0), block.get(i));
+                if (v!=null && v.length() > 0) {
                     writer.append(v);
                 }
+                first = false;
             }
             writer.flush();
         }
