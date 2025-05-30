@@ -1,6 +1,14 @@
 package tech.ydb.samples.exporter;
 
+import com.google.gson.Gson;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -11,6 +19,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
 import tech.ydb.common.transaction.TxMode;
 import tech.ydb.query.QuerySession;
 import tech.ydb.query.tools.QueryReader;
@@ -32,27 +42,27 @@ public class Tool implements Runnable, AutoCloseable {
     private final YdbConnector yc;
     private final JobDef job;
     private final SessionRetryContext retryCtx;
+    private final Gson gson;
 
     private final AtomicBoolean shouldRun = new AtomicBoolean(false);
     private final AtomicReference<ExecutorService> es = new AtomicReference<>();
     private final AtomicLong numberOfJobsScheduled = new AtomicLong(0);
     private final ArrayList<Throwable> jobFailures = new ArrayList<>();
+
     private final ArrayBlockingQueue<ArrayList<String[]>> outputQueue;
+    private final AtomicReference<Thread> outputThread  = new AtomicReference<>();
 
     public Tool(YdbConnector yc, JobDef job) {
         this.yc = yc;
         this.job = job;
         this.retryCtx = SessionRetryContext.create(yc.getQueryClient()).build();
+        this.gson = new Gson();
         this.outputQueue = new ArrayBlockingQueue<>(1000);
     }
 
     @Override
     public void close() {
-        shouldRun.set(false);
-        ExecutorService temp = es.getAndSet(null);
-        if (temp!=null) {
-            temp.shutdownNow();
-        }
+        shutdownExecutors();
     }
 
     @Override
@@ -60,21 +70,29 @@ public class Tool implements Runnable, AutoCloseable {
         if (shouldRun.get() || es.get() != null) {
             throw new IllegalStateException("Already running");
         }
-        shouldRun.set(true);
         LOG.info("Initializing parallel exporter...");
-        initExecutors();
+        try {
+            initExecutors();
+        } catch(Exception ex) {
+            throw new RuntimeException("Initialization failed", ex);
+        }
         if (job.isUseMainQueryPaging()) {
             mainPagedRead();
         } else {
             mainSingleRead();
         }
         waitJobs();
+        shutdownExecutors();
         LOG.info("Parallel exporter job completed.");
     }
 
-    private void initExecutors() {
-        ExecutorService old = es.getAndSet(
-                Executors.newFixedThreadPool(1 + job.getWorkerCount(),
+    private synchronized void initExecutors() throws Exception {
+        if (es.get() != null || outputThread.get() != null) {
+            throw new IllegalStateException("Already initialized");
+        }
+        shouldRun.set(true);
+        es.set(
+                Executors.newFixedThreadPool(job.getWorkerCount(),
                         new ThreadFactory() {
             final AtomicInteger threadCounter = new AtomicInteger(0);
             @Override
@@ -87,10 +105,20 @@ public class Tool implements Runnable, AutoCloseable {
                 return t;
             }
                 }));
-        if (old!=null) {
-            old.shutdownNow();
-            throw new IllegalStateException("Concurrent initialization");
+        Thread outputThreadTemp = new Thread(new OutputWorker());
+        outputThreadTemp.setName("ydb-exporter-output");
+        outputThreadTemp.setDaemon(true);
+        outputThreadTemp.start();
+        outputThread.set(outputThreadTemp);
+    }
+
+    private synchronized void shutdownExecutors() {
+        shouldRun.set(false);
+        ExecutorService temp = es.getAndSet(null);
+        if (temp!=null) {
+            temp.shutdownNow();
         }
+        outputThread.set(null);
     }
 
     private void waitJobs() {
@@ -105,8 +133,21 @@ public class Tool implements Runnable, AutoCloseable {
             }
             sleepMillis(50L);
         }
+        LOG.info("Background scanner tasks completed.");
+        if (outputThread.get() != null) {
+            try {
+                // Sign to stop
+                outputQueue.put(new ArrayList<>());
+                // Wait for actual stop
+                LOG.info("Waiting for output task completion...");
+                outputThread.get().join();
+            } catch(InterruptedException ix) {
+                throw new RuntimeException("Interrupted on output queue flush");
+            }
+            LOG.info("Output task completed.");
+        }
     }
-    
+
     private boolean reportFailures() {
         final ArrayList<Throwable> errors;
         synchronized(jobFailures) {
@@ -212,6 +253,52 @@ public class Tool implements Runnable, AutoCloseable {
         LOG.info("Dropping the batch of {} records due to shutdown.", output.getRowCount());
     }
     
+    private String formatHeader(String[] columns) {
+        if (JobDef.Format.JSON.equals(job.getOutputFormat())) {
+            return null;
+        }
+        final StringBuilder sb = new StringBuilder();
+        try {
+            CSVPrinter cp;
+            if (JobDef.Format.TSV.equals(job.getOutputFormat())) {
+                cp = new CSVPrinter(sb, CSVFormat.POSTGRESQL_TEXT);
+            } else {
+                cp = new CSVPrinter(sb, CSVFormat.POSTGRESQL_CSV);
+            }
+            cp.printRecord(Arrays.asList(columns));
+        } catch(IOException iox) {
+            throw new RuntimeException("Failed to format CSV header", iox);
+        }
+        return sb.toString();
+    }
+    
+    private String formatRow(String[] columns, String[] values) {
+        if (JobDef.Format.JSON.equals(job.getOutputFormat())) {
+            return formatJsonRow(columns, values);
+        }
+        final StringBuilder sb = new StringBuilder();
+        try {
+            CSVPrinter cp;
+            if (JobDef.Format.TSV.equals(job.getOutputFormat())) {
+                cp = new CSVPrinter(sb, CSVFormat.POSTGRESQL_TEXT);
+            } else {
+                cp = new CSVPrinter(sb, CSVFormat.POSTGRESQL_CSV);
+            }
+            cp.printRecord(Arrays.asList(values));
+        } catch(IOException iox) {
+            throw new RuntimeException("Failed to format CSV record", iox);
+        }
+        return sb.toString();
+    }
+
+    private String formatJsonRow(String[] columns, String[] values) {
+        final HashMap<String,String> m = new HashMap<>();
+        for (int i=0; i<columns.length && i<values.length; ++i) {
+            m.put(columns[i], values[i]);
+        }
+        return gson.toJson(m) + "\n";
+    }
+    
     public static void main(String[] args) {
         if (args.length != 2) {
             System.out.println("USAGE: App connection.xml job.xml");
@@ -228,6 +315,70 @@ public class Tool implements Runnable, AutoCloseable {
         } catch(Exception ex) {
             LOG.error("FATAL", ex);
         }
+    }
+
+    private class OutputWorker implements Runnable {
+        
+        final Writer writer;
+        final boolean own;
+        
+        OutputWorker() throws IOException {
+            String fname = job.getOutputFile();
+            if (fname.isEmpty() || fname.equalsIgnoreCase("-")) {
+                this.writer = new PrintWriter(System.out);
+                this.own = false;
+            } else {
+                this.writer = new OutputStreamWriter(
+                                new FileOutputStream(fname), StandardCharsets.UTF_8);
+                this.own = true;
+            }
+        }
+        
+        @Override
+        public void run() {
+            try {
+                doRun();
+            } catch(Exception ex) {
+                LOG.error("Failed to write to output file {}", job.getOutputFile(), ex);
+            } finally {
+                if (own) {
+                    try {
+                        writer.close();
+                    } catch(Exception err) {
+                        LOG.error("Failed to close output file {}", job.getOutputFile(), err);
+                    }
+                }
+            }
+        }
+        
+        void doRun() throws IOException {
+            boolean first = true;
+            while (true) {
+                final ArrayList<String[]> block;
+                try {
+                    block = outputQueue.take();
+                } catch(InterruptedException ix) {
+                    continue;
+                }
+                if (block==null || block.isEmpty()) {
+                    break;
+                }
+                String v;
+                if (first) {
+                    v = formatHeader(block.get(0));
+                    if (v!=null && v.length() > 0) {
+                        writer.append(v);
+                    }
+                }
+                first = false;
+                for (int i=1; i<block.size(); ++i) {
+                    v = formatRow(block.get(0), block.get(i));
+                    writer.append(v);
+                }
+            }
+            writer.flush();
+        }
+
     }
 
     private class PartWorker implements Runnable {
