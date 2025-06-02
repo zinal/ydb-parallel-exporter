@@ -1,6 +1,6 @@
 /.vscode/
 /target/
-/scripts/sample-*-real.xml
+/scripts/*-real.xml
 nb-configuration.xml
 nbactions.xml
 *.log

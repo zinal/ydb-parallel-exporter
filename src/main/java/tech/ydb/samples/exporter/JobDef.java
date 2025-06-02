@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.Serializable;
 import java.util.ArrayList;
+import org.jdom2.Element;
 
 /**
  *
@@ -86,15 +87,55 @@ public class JobDef implements Serializable {
     }
 
     public static JobDef fromXml(String fname) throws IOException {
-        return fromXml(new FileInputStream(fname));
-    }
-    
-    public static JobDef fromXml(byte[] input) throws IOException {
-        return fromXml(new ByteArrayInputStream(input));
-    }
-    
-    public static JobDef fromXml(InputStream input) throws IOException {
-        return new JobDef();
+        JobDef job = new JobDef();
+        Element docRoot = JdomHelper.readDocument(fname);
+        Element el;
+        el = JdomHelper.getOneChild(docRoot, "worker-count");
+        if (el!=null) {
+            job.setWorkerCount(JdomHelper.getInt(el));
+        }
+        el = JdomHelper.getOneChild(docRoot, "output-format");
+        if (el!=null) {
+            String t = JdomHelper.getText(el);
+            boolean found = false;
+            for (Format f : Format.values()) {
+                if (f.name().equalsIgnoreCase(t)) {
+                    found = true;
+                    job.setOutputFormat(f);
+                    break;
+                }
+            }
+            if (!found) {
+                throw JdomHelper.raise(el, "Illegal output format value: " + t);
+            }
+        }
+        el = JdomHelper.getOneChild(docRoot, "output-file");
+        if (el!=null) {
+            job.setOutputFile(JdomHelper.getText(el));
+        }
+        job.setMainQuery(JdomHelper.getText(docRoot, "query-main"));
+        Element elPageQuery = JdomHelper.getOneChild(docRoot, "query-page");
+        if (elPageQuery != null) {
+            job.setPageQuery(JdomHelper.getText(elPageQuery));
+        }
+        job.setDetailsQuery(JdomHelper.getText(docRoot, "query-details"));
+        el = JdomHelper.getOneChild(docRoot, "input-page");
+        if (el!=null) {
+            JdomHelper.getSomeChildren(el, "column-name")
+                    .forEach(col -> job.getPageInput().add(JdomHelper.getText(col)));
+        }
+        if (job.hasPageQuery() && job.getPageInput().isEmpty()) {
+            throw JdomHelper.raise(elPageQuery, "Missing input columns for page query");
+        }
+        el = JdomHelper.getOneChild(docRoot, "input-details");
+        if (el!=null) {
+            JdomHelper.getSomeChildren(el, "column-name")
+                    .forEach(col -> job.getDetailsInput().add(JdomHelper.getText(col)));
+        }
+        if (job.getDetailsInput().isEmpty()) {
+            throw JdomHelper.raise(docRoot, "Missing input columns for details query");
+        }
+        return job;
     }
     
     public static enum Format {

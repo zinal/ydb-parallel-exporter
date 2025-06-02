@@ -376,7 +376,7 @@ public class Tool implements Runnable, AutoCloseable {
 
     public static void main(String[] args) {
         if (args.length != 2) {
-            System.out.println("USAGE: App connection.xml job.xml");
+            System.out.println("USAGE: Tool connection.xml job.xml");
             System.exit(1);
         }
         try {
