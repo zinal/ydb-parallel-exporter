@@ -76,7 +76,7 @@ public class Tool implements Runnable, AutoCloseable {
         } catch(Exception ex) {
             throw new RuntimeException("Initialization failed", ex);
         }
-        if (job.isUseMainQueryPaging()) {
+        if (job.hasPageQuery()) {
             mainPagedRead();
         } else {
             mainSingleRead();
@@ -172,10 +172,46 @@ public class Tool implements Runnable, AutoCloseable {
     
     private void mainPagedRead() {
         LOG.info("Performing paged reads for the main query.");
-        
-        LOG.info("Main query completed.");
-    }
 
+        QueryReader result = retryCtx.supplyResult(
+                session -> QueryReader.readFrom(
+                        session.createQuery(job.getMainQuery(), TxMode.SERIALIZABLE_RW))
+        ).join().getValue();
+
+        while (shouldRun.get()) {
+            for (int pos = 0; pos < result.getResultSetCount(); ++pos) {
+                submitMainPart(result.getResultSet(pos));
+            }
+            StructValue input = collectKey(result);
+            if (input==null) {
+                break;
+            }
+            Params params = Params.of("$input", input);
+            result = retryCtx.supplyResult(
+                    session -> QueryReader.readFrom(
+                            session.createQuery(job.getPageQuery(), TxMode.SERIALIZABLE_RW, params))
+            ).join().getValue();
+        }
+
+        if (! shouldRun.get()) {
+            LOG.warn("Main query canceled.");
+        } else {
+            LOG.info("Main query completed.");
+        }
+    }
+    
+    private StructValue collectKey(QueryReader result) {
+        StructValue sv = null;
+        for (int pos = 0; pos < result.getResultSetCount(); ++pos) {
+            ResultSetReader rsr = result.getResultSet(pos);
+            if (rsr.getRowCount()==0) {
+                continue;
+            }
+            rsr.setRowIndex(0);
+        }
+        return sv;
+    }
+    
     private void mainSingleRead() {
         LOG.info("Performing single-action read for the main query.");
         try (QuerySession qs = yc.createQuerySession()) {
@@ -187,7 +223,7 @@ public class Tool implements Runnable, AutoCloseable {
         }
         LOG.info("Main query completed.");
     }
-    
+
     private void submitMainPart(ResultSetReader rsr) {
         if (shouldRun.get()) {
             es.get().submit(new PartWorker(rsr));

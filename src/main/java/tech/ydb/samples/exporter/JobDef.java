@@ -14,15 +14,19 @@ import java.util.ArrayList;
 public class JobDef implements Serializable {
 
     private int workerCount = 1;
-    private boolean useMainQueryPaging = false;
     private String mainQuery = null;
-    private final ArrayList<String> mainInput = new ArrayList<>();
+    private String pageQuery = null;
+    private final ArrayList<String> pageInput = new ArrayList<>();
     private String detailsQuery = null;
     private final ArrayList<String> detailsInput = new ArrayList<>();
     private Format outputFormat = Format.CSV;
     private String outputFile = "-"; // stdout
     
     public JobDef() {
+    }
+    
+    public boolean hasPageQuery() {
+        return pageQuery!=null && !pageQuery.isEmpty();
     }
 
     public int getWorkerCount() {
@@ -33,14 +37,6 @@ public class JobDef implements Serializable {
         this.workerCount = workerCount;
     }
 
-    public boolean isUseMainQueryPaging() {
-        return useMainQueryPaging;
-    }
-
-    public void setUseMainQueryPaging(boolean useMainQueryPaging) {
-        this.useMainQueryPaging = useMainQueryPaging;
-    }
-
     public String getMainQuery() {
         return mainQuery;
     }
@@ -49,8 +45,16 @@ public class JobDef implements Serializable {
         this.mainQuery = mainQuery;
     }
 
-    public ArrayList<String> getMainInput() {
-        return mainInput;
+    public String getPageQuery() {
+        return pageQuery;
+    }
+
+    public void setPageQuery(String pageQuery) {
+        this.pageQuery = pageQuery;
+    }
+
+    public ArrayList<String> getPageInput() {
+        return pageInput;
     }
 
     public String getDetailsQuery() {
