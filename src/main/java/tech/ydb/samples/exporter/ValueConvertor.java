@@ -32,11 +32,11 @@ public class ValueConvertor {
             if (ov.isPresent()) {
                 value = ov.get();
             } else {
-                return "";
+                return null;
             }
         }
         if (value==null) {
-            return "";
+            return null;
         }
         if (value instanceof DecimalValue dv) {
             return dv.toUnscaledString();

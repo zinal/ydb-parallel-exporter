@@ -162,7 +162,7 @@ public class Tool implements Runnable, AutoCloseable {
         if (errors.isEmpty()) {
             return false;
         }
-        LOG.info("*** Total {} sub-job failures detected.", errors.size());
+        LOG.error("*** Total {} sub-job failures detected.", errors.size());
         // Group relevant messages and report
         final HashMap<String, Integer> messages = new HashMap<>();
         for (Throwable e : errors) {
@@ -181,7 +181,7 @@ public class Tool implements Runnable, AutoCloseable {
             }
         }
         for (Map.Entry<String,Integer> me : messages.entrySet()) {
-            LOG.info("\t - {}\t{}", me.getKey(), me.getValue());
+            LOG.error("\t - {}\t{}", me.getKey(), me.getValue());
         }
         return true;
     }
@@ -209,15 +209,8 @@ public class Tool implements Runnable, AutoCloseable {
             }
         }
         if (issues.isEmpty()) {
-            cur = main;
-            while (cur != null) {
-                issues.add(cur.getMessage());
-                if (cur.getCause() != cur) {
-                    cur = cur.getCause();
-                } else {
-                    cur = null;
-                }
-            }
+            issues.add("Unexpected client error");
+            LOG.error("Sub-task error", main);
         }
         return issues;
     }
@@ -304,6 +297,9 @@ public class Tool implements Runnable, AutoCloseable {
     }
 
     private void processMainPart(ResultSetReader input) {
+        if (input.getRowCount() < 1) {
+            return;
+        }
         input.setRowIndex(0);
         Value<?>[] rows;
         if (job.getDetailsInput().isEmpty()) {
