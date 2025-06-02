@@ -163,57 +163,12 @@ public class Tool implements Runnable, AutoCloseable {
             return false;
         }
         LOG.error("*** Total {} sub-job failures detected.", errors.size());
-        // Group relevant messages and report
-        final HashMap<String, Integer> messages = new HashMap<>();
-        for (Throwable e : errors) {
-            ArrayList<String> xs = extractErrorMessage(e);
-            for (String x : xs) {
-                String cur = x.trim();
-                if (cur.endsWith(".")) {
-                    cur = cur.substring(0, cur.length()-1);
-                }
-                Integer v = messages.get(cur);
-                if (v==null) {
-                    messages.put(cur, 1);
-                } else {
-                    messages.put(cur, v + 1);
-                }
-            }
-        }
-        for (Map.Entry<String,Integer> me : messages.entrySet()) {
-            LOG.error("\t - {}\t{}", me.getKey(), me.getValue());
+        for (Throwable err : errors) {
+            LOG.error("Sub-task error", err);
         }
         return true;
     }
 
-    public static ArrayList<String> extractErrorMessage(Throwable cur) {
-        Throwable main = cur;
-        final ArrayList<String> issues = new ArrayList<>();
-        while (cur != null) {
-            if (cur instanceof UnexpectedResultException ure) {
-                Status status = ure.getStatus();
-                if (! status.isSuccess()) {
-                    if (ure.getStatus().getIssues() != null) {
-                        for (Issue issue : ure.getStatus().getIssues()) {
-                            if (issue.getMessage()!=null && issue.getMessage().length() > 0) {
-                                issues.add(issue.getMessage());
-                            }
-                        }
-                    }
-                }
-            }
-            if (cur.getCause() != cur) {
-                cur = cur.getCause();
-            } else {
-                cur = null;
-            }
-        }
-        if (issues.isEmpty()) {
-            issues.add("Unexpected client error");
-            LOG.error("Sub-task error", main);
-        }
-        return issues;
-    }
     private void sleepMillis(long millis) {
         try {
             Thread.sleep(millis);
