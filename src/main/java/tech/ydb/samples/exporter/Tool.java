@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -22,6 +23,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 import tech.ydb.common.transaction.TxMode;
+import tech.ydb.core.Issue;
+import tech.ydb.core.Status;
+import tech.ydb.core.UnexpectedResultException;
 import tech.ydb.query.QuerySession;
 import tech.ydb.query.tools.QueryReader;
 import tech.ydb.query.tools.SessionRetryContext;
@@ -58,7 +62,7 @@ public class Tool implements Runnable, AutoCloseable {
         this.job = job;
         this.retryCtx = SessionRetryContext.create(yc.getQueryClient()).build();
         this.gson = new Gson();
-        this.outputQueue = new ArrayBlockingQueue<>(1000);
+        this.outputQueue = new ArrayBlockingQueue<>(job.getQueueSize());
     }
 
     @Override
@@ -159,10 +163,64 @@ public class Tool implements Runnable, AutoCloseable {
             return false;
         }
         LOG.info("*** Total {} sub-job failures detected.", errors.size());
-        // TODO: group relevant messages and report
+        // Group relevant messages and report
+        final HashMap<String, Integer> messages = new HashMap<>();
+        for (Throwable e : errors) {
+            ArrayList<String> xs = extractErrorMessage(e);
+            for (String x : xs) {
+                String cur = x.trim();
+                if (cur.endsWith(".")) {
+                    cur = cur.substring(0, cur.length()-1);
+                }
+                Integer v = messages.get(cur);
+                if (v==null) {
+                    messages.put(cur, 1);
+                } else {
+                    messages.put(cur, v + 1);
+                }
+            }
+        }
+        for (Map.Entry<String,Integer> me : messages.entrySet()) {
+            LOG.info("\t - {}\t{}", me.getKey(), me.getValue());
+        }
         return true;
     }
 
+    public static ArrayList<String> extractErrorMessage(Throwable cur) {
+        Throwable main = cur;
+        final ArrayList<String> issues = new ArrayList<>();
+        while (cur != null) {
+            if (cur instanceof UnexpectedResultException ure) {
+                Status status = ure.getStatus();
+                if (! status.isSuccess()) {
+                    if (ure.getStatus().getIssues() != null) {
+                        for (Issue issue : ure.getStatus().getIssues()) {
+                            if (issue.getMessage()!=null && issue.getMessage().length() > 0) {
+                                issues.add(issue.getMessage());
+                            }
+                        }
+                    }
+                }
+            }
+            if (cur.getCause() != cur) {
+                cur = cur.getCause();
+            } else {
+                cur = null;
+            }
+        }
+        if (issues.isEmpty()) {
+            cur = main;
+            while (cur != null) {
+                issues.add(cur.getMessage());
+                if (cur.getCause() != cur) {
+                    cur = cur.getCause();
+                } else {
+                    cur = null;
+                }
+            }
+        }
+        return issues;
+    }
     private void sleepMillis(long millis) {
         try {
             Thread.sleep(millis);

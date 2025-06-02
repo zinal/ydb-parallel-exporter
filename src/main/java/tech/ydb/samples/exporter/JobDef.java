@@ -1,9 +1,6 @@
 package tech.ydb.samples.exporter;
 
-import java.io.ByteArrayInputStream;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.Serializable;
 import java.util.ArrayList;
 import org.jdom2.Element;
@@ -15,6 +12,7 @@ import org.jdom2.Element;
 public class JobDef implements Serializable {
 
     private int workerCount = 1;
+    private int queueSize = 100;
     private String mainQuery = null;
     private String pageQuery = null;
     private final ArrayList<String> pageInput = new ArrayList<>();
@@ -36,6 +34,14 @@ public class JobDef implements Serializable {
 
     public void setWorkerCount(int workerCount) {
         this.workerCount = workerCount;
+    }
+
+    public int getQueueSize() {
+        return queueSize;
+    }
+
+    public void setQueueSize(int queueSize) {
+        this.queueSize = queueSize;
     }
 
     public String getMainQuery() {
@@ -93,6 +99,10 @@ public class JobDef implements Serializable {
         el = JdomHelper.getOneChild(docRoot, "worker-count");
         if (el!=null) {
             job.setWorkerCount(JdomHelper.getInt(el));
+        }
+        el = JdomHelper.getOneChild(docRoot, "queue-size");
+        if (el!=null) {
+            job.setQueueSize(JdomHelper.getInt(el));
         }
         el = JdomHelper.getOneChild(docRoot, "output-format");
         if (el!=null) {
