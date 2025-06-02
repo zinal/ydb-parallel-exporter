@@ -51,6 +51,7 @@ public class Tool implements Runnable, AutoCloseable {
 
     private final ArrayBlockingQueue<ArrayList<String[]>> outputQueue;
     private final AtomicReference<Thread> outputThread  = new AtomicReference<>();
+    private final Stats stats = new Stats();
 
     public Tool(YdbConnector yc, JobDef job) {
         this.yc = yc;
@@ -91,6 +92,7 @@ public class Tool implements Runnable, AutoCloseable {
             throw new IllegalStateException("Already initialized");
         }
         shouldRun.set(true);
+        stats.start();
         es.set(
                 Executors.newFixedThreadPool(job.getWorkerCount(),
                         new ThreadFactory() {
@@ -101,7 +103,6 @@ public class Tool implements Runnable, AutoCloseable {
                 t.setDaemon(true);
                 t.setName("ydb-exporter-worker-" 
                         + String.valueOf(threadCounter.incrementAndGet()));
-                t.start();
                 return t;
             }
                 }));
@@ -182,7 +183,7 @@ public class Tool implements Runnable, AutoCloseable {
             for (int pos = 0; pos < result.getResultSetCount(); ++pos) {
                 submitMainPart(result.getResultSet(pos));
             }
-            StructValue input = collectKey(result);
+            StructValue input = collectPagedKey(result);
             if (input==null) {
                 // Empty input means end of data.
                 break;
@@ -201,7 +202,7 @@ public class Tool implements Runnable, AutoCloseable {
         }
     }
 
-    private StructValue collectKey(QueryReader result) {
+    private StructValue collectPagedKey(QueryReader result) {
         StructValue sv = null;
         for (int pos = 0; pos < result.getResultSetCount(); ++pos) {
             ResultSetReader rsr = result.getResultSet(pos);
@@ -210,7 +211,7 @@ public class Tool implements Runnable, AutoCloseable {
             }
             rsr.setRowIndex(rsr.getRowCount() - 1);
             HashMap<String,Value<?>> m = new HashMap<>();
-            for (String column : job.getDetailsInput()) {
+            for (String column : job.getPageInput()) {
                 m.put(column, rsr.getColumn(column).getValue());
             }
             sv = StructValue.of(m);
@@ -232,6 +233,7 @@ public class Tool implements Runnable, AutoCloseable {
 
     private void submitMainPart(ResultSetReader rsr) {
         if (shouldRun.get()) {
+            stats.update1(rsr);
             es.get().submit(new PartWorker(rsr));
         }
     }
@@ -247,14 +249,14 @@ public class Tool implements Runnable, AutoCloseable {
         input.setRowIndex(0);
         Value<?>[] rows;
         if (job.getDetailsInput().isEmpty()) {
-            rows = collectMainKeys1(input);
+            rows = collectDetailsKeys1(input);
         } else {
-            rows = collectMainKeys2(input);
+            rows = collectDetailsKeys2(input);
         }
         grabDetails(ListValue.of(rows));
     }
 
-    private Value<?>[] collectMainKeys1(ResultSetReader input) {
+    private Value<?>[] collectDetailsKeys1(ResultSetReader input) {
         Value<?>[] rows = new StructValue[input.getRowCount()];
         int rownum = 0;
         while (input.next()) {
@@ -267,7 +269,7 @@ public class Tool implements Runnable, AutoCloseable {
         return rows;
     }
 
-    private Value<?>[] collectMainKeys2(ResultSetReader input) {
+    private Value<?>[] collectDetailsKeys2(ResultSetReader input) {
         Value<?>[] rows = new StructValue[input.getRowCount()];
         int[] indexes = new int[job.getDetailsInput().size()];
         for (int ix = 0; ix < indexes.length; ++ix) {
@@ -438,11 +440,12 @@ public class Tool implements Runnable, AutoCloseable {
                 if (block==null || block.isEmpty()) {
                     break;
                 }
+                stats.update2(block);
                 CharSequence v;
                 if (JobDef.Format.JSON.equals(job.getOutputFormat())) {
-                    v = formatCsv(first, block);
-                } else {
                     v = formatJson(block);
+                } else {
+                    v = formatCsv(first, block);
                 }
                 if (v!=null && v.length() > 0) {
                     writer.append(v);
@@ -470,6 +473,52 @@ public class Tool implements Runnable, AutoCloseable {
                 processException(ex);
             }
             numberOfJobsScheduled.decrementAndGet();
+        }
+    }
+    
+    private static class Stats {
+        long rowsInput = 0L;
+        long rowsOutput = 0L;
+        long rowsInputPrev = 0L;
+        long rowsOutputPrev = 0L;
+        long tvLast = 0L;
+        
+        synchronized void start() {
+            tvLast = System.currentTimeMillis();
+            rowsInput = 0L;
+            rowsOutput = 0L;
+            rowsInputPrev = 0L;
+            rowsOutputPrev = 0L;
+        }
+        
+        synchronized void update1(ResultSetReader rsr) {
+            rowsInput += rsr.getRowCount();
+            reportProgressIf();
+        }
+
+        synchronized void update2(ArrayList<String[]> block) {
+            rowsOutput += block.size();
+            reportProgressIf();
+        }
+        
+        void reportProgressIf() {
+            long tv = System.currentTimeMillis();
+            if (tv - tvLast >= 10000L) {
+                reportProgress(tv);
+                tvLast = tv;
+                rowsInputPrev = rowsInput;
+                rowsOutputPrev = rowsOutput;
+            }
+        }
+
+        private void reportProgress(long tv) {
+            long input = rowsInput - rowsInputPrev;
+            long output = rowsOutput - rowsOutputPrev;
+            long millis = tv - tvLast;
+            double rateInput = ((double)input) * 1000.0 / ((double)millis);
+            double rateOutput = ((double)output) * 1000.0 / ((double)millis);
+            LOG.info("PROGRESS: {} input and {} output rows, rates: {} and {} rows per second.",
+                    input, output, String.format("%.2f", rateInput), String.format("%.2f", rateOutput));
         }
     }
 }

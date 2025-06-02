@@ -1,16 +1,12 @@
 package tech.ydb.samples.exporter;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.Month;
+import org.apache.commons.codec.binary.Base64;
 import tech.ydb.table.result.ResultSetReader;
 import tech.ydb.table.result.ValueReader;
 import tech.ydb.table.values.DecimalValue;
-import tech.ydb.table.values.OptionalType;
 import tech.ydb.table.values.OptionalValue;
-import tech.ydb.table.values.PrimitiveType;
+import static tech.ydb.table.values.PrimitiveType.Bool;
 import tech.ydb.table.values.PrimitiveValue;
-import tech.ydb.table.values.Type;
 import tech.ydb.table.values.Value;
 
 /**
@@ -44,6 +40,25 @@ public class ValueConvertor {
         }
         if (value instanceof DecimalValue dv) {
             return dv.toUnscaledString();
+        }
+        if (value instanceof PrimitiveValue pv) {
+            switch (pv.getType()) {
+                case Bool -> {
+                    return pv.getBool() ? "true" : "false";
+                }
+                case Text -> {
+                    return pv.getText();
+                }
+                case Json -> {
+                    return pv.getJson();
+                }
+                case JsonDocument -> {
+                    return pv.getJsonDocument();
+                }
+                case Bytes -> {
+                    return Base64.encodeBase64String(pv.getBytes());
+                }
+            }
         }
         return value.toString();
     }
