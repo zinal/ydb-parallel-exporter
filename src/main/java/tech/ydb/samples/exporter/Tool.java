@@ -184,6 +184,7 @@ public class Tool implements Runnable, AutoCloseable {
             }
             StructValue input = collectKey(result);
             if (input==null) {
+                // Empty input means end of data.
                 break;
             }
             Params params = Params.of("$input", input);
@@ -199,7 +200,7 @@ public class Tool implements Runnable, AutoCloseable {
             LOG.info("Main query completed.");
         }
     }
-    
+
     private StructValue collectKey(QueryReader result) {
         StructValue sv = null;
         for (int pos = 0; pos < result.getResultSetCount(); ++pos) {
@@ -207,11 +208,16 @@ public class Tool implements Runnable, AutoCloseable {
             if (rsr.getRowCount()==0) {
                 continue;
             }
-            rsr.setRowIndex(0);
+            rsr.setRowIndex(rsr.getRowCount() - 1);
+            HashMap<String,Value<?>> m = new HashMap<>();
+            for (String column : job.getDetailsInput()) {
+                m.put(column, rsr.getColumn(column).getValue());
+            }
+            sv = StructValue.of(m);
         }
         return sv;
     }
-    
+
     private void mainSingleRead() {
         LOG.info("Performing single-action read for the main query.");
         try (QuerySession qs = yc.createQuerySession()) {
@@ -238,6 +244,7 @@ public class Tool implements Runnable, AutoCloseable {
     }
 
     private void processMainPart(ResultSetReader input) {
+        input.setRowIndex(0);
         Value<?>[] rows;
         if (job.getDetailsInput().isEmpty()) {
             rows = collectMainKeys1(input);
