@@ -53,7 +53,7 @@ public class Tool implements Runnable, AutoCloseable {
     private final AtomicLong numberOfJobsScheduled = new AtomicLong(0);
     private final ArrayList<Throwable> jobFailures = new ArrayList<>();
 
-    private final ArrayBlockingQueue<ArrayList<String[]>> outputQueue;
+    private final ArrayBlockingQueue<ArrayList<Object[]>> outputQueue;
     private final AtomicReference<Thread> outputThread  = new AtomicReference<>();
     private final Stats stats = new Stats();
 
@@ -239,7 +239,7 @@ public class Tool implements Runnable, AutoCloseable {
 
     private void submitMainPart(ResultSetReader rsr) {
         if (shouldRun.get()) {
-            stats.update1(rsr);
+            stats.updateInput(rsr);
             es.get().submit(new PartWorker(rsr));
         }
     }
@@ -262,6 +262,7 @@ public class Tool implements Runnable, AutoCloseable {
         } else {
             rows = collectDetailsKeys2(input);
         }
+        stats.updateInside(rows);
         grabDetails(ListValue.of(rows));
     }
 
@@ -327,7 +328,7 @@ public class Tool implements Runnable, AutoCloseable {
         for (int column = 0; column < output.getColumnCount(); ++column) {
             columnNames[column] = output.getColumnName(column);
         }
-        ArrayList<String[]> batch = new ArrayList<>(1 + output.getRowCount());
+        ArrayList<Object[]> batch = new ArrayList<>(1 + output.getRowCount());
         batch.add(columnNames);
         while (output.next()) {
             batch.add(ValueConvertor.convertRecord(output));
@@ -342,18 +343,18 @@ public class Tool implements Runnable, AutoCloseable {
         LOG.info("Dropping the batch of {} records due to shutdown.", output.getRowCount());
     }
     
-    private CharSequence formatJson(ArrayList<String[]> block) {
+    private CharSequence formatJson(ArrayList<Object[]> block) {
         if (block.size() <= 1) {
             return "";
         }
         final StringBuilder sb = new StringBuilder();
-        String[] columns = block.get(0);
-        final HashMap<String,String> m = new HashMap<>();
+        Object[] columns = block.get(0);
+        final HashMap<String,Object> m = new HashMap<>();
         for (int i=1; i<block.size(); ++i) {
             m.clear();
-            String[] values = block.get(i);
+            Object[] values = block.get(i);
             for (int j=0; j<columns.length && j<values.length; ++j) {
-                m.put(columns[j], values[j]);
+                m.put(columns[j].toString(), values[j]);
             }
             gson.toJson(m, sb);
             sb.append("\n");
@@ -361,7 +362,7 @@ public class Tool implements Runnable, AutoCloseable {
         return sb;
     }
     
-    private CharSequence formatCsv(boolean first, ArrayList<String[]> block) {
+    private CharSequence formatCsv(boolean first, ArrayList<Object[]> block) {
         if (block.size() <= 1) {
             return "";
         }
@@ -371,7 +372,7 @@ public class Tool implements Runnable, AutoCloseable {
             if (JobDef.Format.TSV.equals(job.getOutputFormat())) {
                 cp = new CSVPrinter(sb, CSVFormat.POSTGRESQL_TEXT);
             } else {
-                cp = new CSVPrinter(sb, CSVFormat.POSTGRESQL_CSV);
+                cp = new CSVPrinter(sb, CSVFormat.RFC4180);
             }
             if (first) {
                 cp.printRecord(Arrays.asList(block.get(0)));
@@ -440,7 +441,7 @@ public class Tool implements Runnable, AutoCloseable {
         void doRun() throws IOException {
             boolean first = true;
             while (true) {
-                final ArrayList<String[]> block;
+                final ArrayList<Object[]> block;
                 try {
                     block = outputQueue.take();
                 } catch(InterruptedException ix) {
@@ -449,7 +450,7 @@ public class Tool implements Runnable, AutoCloseable {
                 if (block==null || block.isEmpty()) {
                     break;
                 }
-                stats.update2(block);
+                stats.updateOutput(block);
                 CharSequence v;
                 if (JobDef.Format.JSON.equals(job.getOutputFormat())) {
                     v = formatJson(block);
@@ -487,11 +488,13 @@ public class Tool implements Runnable, AutoCloseable {
     
     private static class Stats {
         long rowsInput = 0L;
+        long rowsInside = 0L;
         long rowsOutput = 0L;
         long rowsInputPrev = 0L;
+        long rowsInsidePrev = 0L;
         long rowsOutputPrev = 0L;
         long tvLast = 0L;
-        
+
         synchronized void start() {
             tvLast = System.currentTimeMillis();
             rowsInput = 0L;
@@ -499,35 +502,44 @@ public class Tool implements Runnable, AutoCloseable {
             rowsInputPrev = 0L;
             rowsOutputPrev = 0L;
         }
-        
-        synchronized void update1(ResultSetReader rsr) {
+
+        synchronized void updateInput(ResultSetReader rsr) {
             rowsInput += rsr.getRowCount();
             reportProgressIf();
         }
 
-        synchronized void update2(ArrayList<String[]> block) {
+        synchronized void updateInside(Value<?>[] block) {
+            rowsInside += block.length;
+            reportProgressIf();
+        }
+
+        synchronized void updateOutput(ArrayList<Object[]> block) {
             rowsOutput += block.size();
             reportProgressIf();
         }
-        
+
         void reportProgressIf() {
             long tv = System.currentTimeMillis();
             if (tv - tvLast >= 10000L) {
                 reportProgress(tv);
                 tvLast = tv;
                 rowsInputPrev = rowsInput;
+                rowsInsidePrev = rowsInside;
                 rowsOutputPrev = rowsOutput;
             }
         }
 
         private void reportProgress(long tv) {
             long input = rowsInput - rowsInputPrev;
+            long inside = rowsInside - rowsInsidePrev;
             long output = rowsOutput - rowsOutputPrev;
             long millis = tv - tvLast;
             double rateInput = ((double)input) * 1000.0 / ((double)millis);
+            double rateInside = ((double)inside) * 1000.0 / ((double)millis);
             double rateOutput = ((double)output) * 1000.0 / ((double)millis);
-            LOG.info("PROGRESS: {} input and {} output rows, rates: {} and {} rows per second.",
-                    input, output, String.format("%.2f", rateInput), String.format("%.2f", rateOutput));
+            LOG.info("PROGRESS (input/inside/output) {}/{}/{} rows, {}/{}/{} rows per second.",
+                    input, inside, output, String.format("%.2f", rateInput),
+                    String.format("%.2f", rateInside), String.format("%.2f", rateOutput));
         }
     }
 }

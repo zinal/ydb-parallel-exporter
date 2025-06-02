@@ -15,15 +15,15 @@ import tech.ydb.table.values.Value;
  */
 public class ValueConvertor {
     
-    public static String[] convertRecord(ResultSetReader output) {
-        String[] values = new String[output.getColumnCount()];
+    public static Object[] convertRecord(ResultSetReader output) {
+        Object[] values = new Object[output.getColumnCount()];
         for (int i = 0; i < output.getColumnCount(); ++i) {
             values[i] = convert(output.getColumn(i));
         }
         return values;
     }
 
-    public static String convert(ValueReader vr) {
+    public static Object convert(ValueReader vr) {
         if (vr==null) {
             return "";
         }
@@ -57,6 +57,30 @@ public class ValueConvertor {
                 }
                 case Bytes -> {
                     return Base64.encodeBase64String(pv.getBytes());
+                }
+                case Int8 -> {
+                    return (int) pv.getInt8();
+                }
+                case Int16 -> {
+                    return (int) pv.getInt16();
+                }
+                case Int32 -> {
+                    return pv.getInt32();
+                }
+                case Int64 -> {
+                    return pv.getInt64();
+                }
+                case Uint8 -> {
+                    return (int) pv.getUint8();
+                }
+                case Uint16 -> {
+                    return (int) pv.getUint16();
+                }
+                case Uint32 -> {
+                    return pv.getUint32();
+                }
+                case Uint64 -> {
+                    return pv.getUint64();
                 }
             }
         }
