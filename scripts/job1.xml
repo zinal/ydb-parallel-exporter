@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Пример файла настроек задания выгрузки данных -->
+<ydb-parallel-exporter>
+    <!-- Количество параллельно выполняемых запросов на выборку детализации -->
+    <worker-count>5</worker-count>
+    <!-- Размер очереди между основным запросом и запросами на выборку детализации -->
+    <queue-size>100</queue-size>
+    <!-- Выходной формат, варианты: CSV, TSV, JSON -->
+    <output-format>CSV</output-format>
+    <!-- Имя выходного файла, значение '-' выводит на стандартный поток вывода -->
+    <output-file>example1.csv</output-file>
+
+    <!-- Основной запрос (запускается первым) -->
+    <query-main><![CDATA[
+SELECT sys_update_tv, id
+FROM my_documents VIEW ix_sys_update_tv
+WHERE sys_update_tv >= Timestamp("2021-01-01T00:00:00Z")
+  AND sys_update_tv < Timestamp("2021-01-02T00:00:00Z")
+-- Обязательна сортировка по префиксу ключа или используемого индекса
+ORDER BY sys_update_tv, id
+-- Обязательно ограничение количества записей
+LIMIT 1000;
+]]> </query-main>
+
+    <!-- Колонки для параметров страничного запроса -->
+    <input-page>
+        <column-name>sys_update_tv</column-name>
+        <column-name>id</column-name>
+    </input-page>
+
+    <!-- Страничный запрос (на выборку следующей страницы данных) -->
+    <query-page><![CDATA[
+DECLARE $input AS Struct<sys_update_tv:Timestamp?, id:Text>;
+SELECT sys_update_tv, id
+FROM my_documents VIEW ix_sys_update_tv
+-- Условие отбора новых уникальных записей
+WHERE (sys_update_tv, id) > ($input.sys_update_tv, $input.id)
+-- Повторить ограничение на правую границу диапазона отбора
+  AND sys_update_tv < Timestamp("2021-01-02T00:00:00Z")
+-- Обязательна сортировка по префиксу ключа или используемого индекса
+ORDER BY sys_update_tv, id
+-- Обязательно ограничение количества записей
+LIMIT 1000;
+]]> </query-page>
+
+    <!-- Колонки для параметров запроса на выборку детализации -->
+    <input-details>
+        <column-name>id</column-name>
+    </input-details>
+
+    <!-- Запрос на выборку детализации. 
+         Принимает список ключей из основного и постраничного запросов.
+         Извлекаемые записи выводятся в настроенном формате.
+         Может выполнять модификации данных.
+    -->
+    <query-details><![CDATA[
+DECLARE $input AS List<Struct<id:Text>>;
+SELECT
+    documents.*,
+    d1.attr1 AS d1_attr1,
+    d2.attr1 AS d2_attr1
+FROM AS_TABLE($input) AS input
+INNER JOIN my_documents VIEW PRIMARY KEY AS documents
+  ON input.id=documents.id
+LEFT JOIN my_dict1 AS d1
+  ON d1.key=documents.dict1
+LEFT JOIN my_dict2 AS d2
+  ON d2.key=documents.dict2
+WHERE documents.some_state IN ('ONE'u, 'TWO'u, 'THREE'u, 'FOUR'u)
+  AND documents.input_tv IS NOT NULL;
+]]> </query-details>
+
+</ydb-parallel-exporter>

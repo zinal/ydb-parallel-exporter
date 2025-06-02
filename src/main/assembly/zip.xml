@@ -44,7 +44,9 @@
             <include>*.csv</include>
         </includes>
         <excludes>
-            <exclude>sample-*-real.xml</exclude>
+            <exclude>*-real.xml</exclude>
+            <exclude>*-real.txt</exclude>
+            <exclude>*-real.csv</exclude>
         </excludes>
         <fileMode>640</fileMode>
     </fileSet>
