@@ -132,7 +132,7 @@ public class Tool implements Runnable, AutoCloseable {
     }
 
     private void waitJobs() {
-        while (numberOfJobsScheduled.get() > 0L) {
+        while (shouldRun.get() && numberOfJobsScheduled.get() > 0L) {
             sleepMillis(50L);
         }
         LOG.info("Background scanner tasks completed.");
@@ -504,8 +504,9 @@ public class Tool implements Runnable, AutoCloseable {
                 processMainPart(datum);
             } catch(Exception ex) {
                 processException(ex);
+            } finally {
+                numberOfJobsScheduled.decrementAndGet();
             }
-            numberOfJobsScheduled.decrementAndGet();
         }
     }
 
