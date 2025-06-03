@@ -10,7 +10,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -23,9 +22,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 import tech.ydb.common.transaction.TxMode;
-import tech.ydb.core.Issue;
-import tech.ydb.core.Status;
-import tech.ydb.core.UnexpectedResultException;
 import tech.ydb.query.QuerySession;
 import tech.ydb.query.tools.QueryReader;
 import tech.ydb.query.tools.SessionRetryContext;
@@ -177,12 +173,20 @@ public class Tool implements Runnable, AutoCloseable {
         }
     }
     
+    private TxMode getIsolation() {
+        if (job.getIsolation()==null) {
+            return TxMode.SERIALIZABLE_RW;
+        } else {
+            return job.getIsolation();
+        }
+    }
+    
     private void mainPagedRead() {
         LOG.info("Performing paged reads for the main query.");
 
         QueryReader result = retryCtx.supplyResult(
                 session -> QueryReader.readFrom(
-                        session.createQuery(job.getMainQuery(), TxMode.SERIALIZABLE_RW))
+                        session.createQuery(job.getMainQuery(), getIsolation()))
         ).join().getValue();
 
         while (shouldRun.get()) {
@@ -197,7 +201,7 @@ public class Tool implements Runnable, AutoCloseable {
             Params params = Params.of("$input", input);
             result = retryCtx.supplyResult(
                     session -> QueryReader.readFrom(
-                            session.createQuery(job.getPageQuery(), TxMode.SERIALIZABLE_RW, params))
+                            session.createQuery(job.getPageQuery(), getIsolation(), params))
             ).join().getValue();
         }
 
@@ -228,7 +232,7 @@ public class Tool implements Runnable, AutoCloseable {
     private void mainSingleRead() {
         LOG.info("Performing single-action read for the main query.");
         try (QuerySession qs = yc.createQuerySession()) {
-            qs.createQuery(job.getMainQuery(), TxMode.SNAPSHOT_RO)
+            qs.createQuery(job.getMainQuery(), getIsolation())
                     .execute(part -> submitMainPart(part.getResultSetReader()))
                     .join()
                     .getStatus()
@@ -308,7 +312,7 @@ public class Tool implements Runnable, AutoCloseable {
         Params params = Params.of("$input", input);
         QueryReader result = retryCtx.supplyResult(
                 session -> QueryReader.readFrom(
-                        session.createQuery(query, TxMode.SERIALIZABLE_RW, params))
+                        session.createQuery(query, getIsolation(), params))
         ).join().getValue();
         pushDetailsToOutput(result);
     }
@@ -370,7 +374,7 @@ public class Tool implements Runnable, AutoCloseable {
         try {
             CSVPrinter cp;
             if (JobDef.Format.TSV.equals(job.getOutputFormat())) {
-                cp = new CSVPrinter(sb, CSVFormat.POSTGRESQL_TEXT);
+                cp = new CSVPrinter(sb, CSVFormat.TDF);
             } else {
                 cp = new CSVPrinter(sb, CSVFormat.RFC4180);
             }

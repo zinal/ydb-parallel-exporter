@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import org.jdom2.Element;
+import tech.ydb.common.transaction.TxMode;
 
 /**
  *
@@ -13,6 +14,7 @@ public class JobDef implements Serializable {
 
     private int workerCount = 1;
     private int queueSize = 100;
+    private TxMode isolation = null;
     private String mainQuery = null;
     private String pageQuery = null;
     private final ArrayList<String> pageInput = new ArrayList<>();
@@ -42,6 +44,14 @@ public class JobDef implements Serializable {
 
     public void setQueueSize(int queueSize) {
         this.queueSize = queueSize;
+    }
+
+    public TxMode getIsolation() {
+        return isolation;
+    }
+
+    public void setIsolation(TxMode isolation) {
+        this.isolation = isolation;
     }
 
     public String getMainQuery() {
@@ -103,6 +113,18 @@ public class JobDef implements Serializable {
         el = JdomHelper.getOneChild(docRoot, "queue-size");
         if (el!=null) {
             job.setQueueSize(JdomHelper.getInt(el));
+        }
+        el = JdomHelper.getOneChild(docRoot, "isolation");
+        if (el!=null) {
+            String v = JdomHelper.getText(el);
+            for (TxMode m : TxMode.values()) {
+                if (m.name().equalsIgnoreCase(v)) {
+                    job.setIsolation(m);
+                }
+            }
+            if (job.getIsolation()==null) {
+                throw JdomHelper.raise(el, "Unknown isolation mode: " + v);
+            }
         }
         el = JdomHelper.getOneChild(docRoot, "output-format");
         if (el!=null) {
