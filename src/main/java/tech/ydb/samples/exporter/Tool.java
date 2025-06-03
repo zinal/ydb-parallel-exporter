@@ -85,6 +85,7 @@ public class Tool implements Runnable, AutoCloseable {
         }
         waitJobs();
         shutdownExecutors();
+        stats.reportProgress();
         LOG.info("Parallel exporter job completed.");
     }
 
@@ -432,10 +433,12 @@ public class Tool implements Runnable, AutoCloseable {
             if (fname.isEmpty() || fname.equalsIgnoreCase("-")) {
                 this.writer = new PrintWriter(System.out);
                 this.own = false;
+                LOG.info("Rows output configured to STDOUT.");
             } else {
                 this.writer = new OutputStreamWriter(
                                 new FileOutputStream(fname), StandardCharsets.UTF_8);
                 this.own = true;
+                LOG.info("Rows output configured to file {}", fname);
             }
         }
         
@@ -536,18 +539,28 @@ public class Tool implements Runnable, AutoCloseable {
             reportProgressIf();
         }
 
-        void reportProgressIf() {
+        synchronized void reportProgress() {
+            long tv = System.currentTimeMillis();
+            printStats(tv);
+            saveState(tv);
+        }
+
+        private void saveState(long tv) {
+            tvLast = tv;
+            rowsInputPrev = rowsInput;
+            rowsInsidePrev = rowsInside;
+            rowsOutputPrev = rowsOutput;
+        }
+
+        private void reportProgressIf() {
             long tv = System.currentTimeMillis();
             if (tv - tvLast >= 10000L) {
-                reportProgress(tv);
-                tvLast = tv;
-                rowsInputPrev = rowsInput;
-                rowsInsidePrev = rowsInside;
-                rowsOutputPrev = rowsOutput;
+                printStats(tv);
+                saveState(tv);
             }
         }
 
-        private void reportProgress(long tv) {
+        private void printStats(long tv) {
             long input = rowsInput - rowsInputPrev;
             long inside = rowsInside - rowsInsidePrev;
             long output = rowsOutput - rowsOutputPrev;
