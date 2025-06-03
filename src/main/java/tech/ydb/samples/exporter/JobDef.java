@@ -20,6 +20,7 @@ public class JobDef implements Serializable {
     private final ArrayList<String> pageInput = new ArrayList<>();
     private String detailsQuery = null;
     private final ArrayList<String> detailsInput = new ArrayList<>();
+    private int detailsBatchLimit = -1;
     private Format outputFormat = Format.CSV;
     private String outputFile = "-"; // stdout
     
@@ -86,6 +87,14 @@ public class JobDef implements Serializable {
         return detailsInput;
     }
 
+    public int getDetailsBatchLimit() {
+        return detailsBatchLimit;
+    }
+
+    public void setDetailsBatchLimit(int detailsBatchLimit) {
+        this.detailsBatchLimit = detailsBatchLimit;
+    }
+
     public Format getOutputFormat() {
         return outputFormat;
     }
@@ -113,6 +122,10 @@ public class JobDef implements Serializable {
         el = JdomHelper.getOneChild(docRoot, "queue-size");
         if (el!=null) {
             job.setQueueSize(JdomHelper.getInt(el));
+        }
+        el = JdomHelper.getOneChild(docRoot, "batch-limit");
+        if (el!=null) {
+            job.setDetailsBatchLimit(JdomHelper.getInt(el));
         }
         el = JdomHelper.getOneChild(docRoot, "isolation");
         if (el!=null) {

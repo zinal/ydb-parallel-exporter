@@ -58,7 +58,8 @@ public class Tool implements Runnable, AutoCloseable {
         this.job = job;
         this.retryCtx = SessionRetryContext.create(yc.getQueryClient()).build();
         this.gson = new Gson();
-        this.outputQueue = new ArrayBlockingQueue<>(job.getQueueSize());
+        this.outputQueue = new ArrayBlockingQueue<>(
+                job.getQueueSize() > 0 ? job.getQueueSize() : 10);
     }
 
     @Override
@@ -93,8 +94,9 @@ public class Tool implements Runnable, AutoCloseable {
         }
         shouldRun.set(true);
         stats.start();
+        int workers = job.getWorkerCount() > 0 ? job.getWorkerCount() : 1;
         es.set(
-                Executors.newFixedThreadPool(job.getWorkerCount(),
+                Executors.newFixedThreadPool(workers,
                         new ThreadFactory() {
             final AtomicInteger threadCounter = new AtomicInteger(0);
             @Override
@@ -266,8 +268,20 @@ public class Tool implements Runnable, AutoCloseable {
         } else {
             rows = collectDetailsKeys2(input);
         }
-        stats.updateInside(rows);
-        grabDetails(ListValue.of(rows));
+        if (job.getDetailsBatchLimit() > 0
+                && rows.length > job.getDetailsBatchLimit()) {
+            int pos = 0;
+            while (pos < rows.length) {
+                int count = Math.min(job.getDetailsBatchLimit(), rows.length - pos);
+                Value<?>[] vs = Arrays.copyOfRange(rows, pos, pos + count);
+                stats.updateInside(vs);
+                grabDetails(vs);
+                pos += count;
+            }
+        } else {
+            stats.updateInside(rows);
+            grabDetails(rows);
+        }
     }
 
     private Value<?>[] collectDetailsKeys1(ResultSetReader input) {
@@ -307,9 +321,9 @@ public class Tool implements Runnable, AutoCloseable {
         return rows;
     }
 
-    private void grabDetails(ListValue input) {
+    private void grabDetails(Value<?>[] input) {
         String query = job.getDetailsQuery();
-        Params params = Params.of("$input", input);
+        Params params = Params.of("$input", ListValue.of(input));
         QueryReader result = retryCtx.supplyResult(
                 session -> QueryReader.readFrom(
                         session.createQuery(query, getIsolation(), params))
@@ -541,9 +555,10 @@ public class Tool implements Runnable, AutoCloseable {
             double rateInput = ((double)input) * 1000.0 / ((double)millis);
             double rateInside = ((double)inside) * 1000.0 / ((double)millis);
             double rateOutput = ((double)output) * 1000.0 / ((double)millis);
-            LOG.info("PROGRESS (input/inside/output) {}/{}/{} rows, {}/{}/{} rows per second.",
+            LOG.info("PROGRESS (in/bw/out) {}/{}/{} rows, {}/{}/{} rps. Total {} input, {} output rows.",
                     input, inside, output, String.format("%.2f", rateInput),
-                    String.format("%.2f", rateInside), String.format("%.2f", rateOutput));
+                    String.format("%.2f", rateInside), String.format("%.2f", rateOutput),
+                    rowsInput, rowsOutput);
         }
     }
 }

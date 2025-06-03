@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Пример файла настроек задания пакетной модификации данных.
+     Сценарий добавления нового поля new_field, которое нужно заполнить
+     по определённым правилам. -->
+<ydb-parallel-exporter>
+    <!-- Количество параллельно выполняемых запросов на обработку детализации -->
+    <worker-count>5</worker-count>
+    <!-- Размер очереди между основным запросом и запросами на обработку детализации -->
+    <queue-size>100</queue-size>
+    <!-- Ограничение на размер пачки ключей, передаваемой в запрос на обработку детализации -->
+    <batch-limit>1000</batch-limit>
+    <!-- Выходной формат, варианты: CSV, TSV, JSON -->
+    <output-format>CSV</output-format>
+    <!-- Имя выходного файла, значение '-' выводит на стандартный поток вывода -->
+    <output-file>-</output-file>
+
+    <!-- Используемый уровень изоляции транзакций:
+       SERIALIZABLE_RW   (по умолчанию, если тег отсутствует)
+       SNAPSHOT_RO
+       STALE_RO
+       ONLINE_RO
+       ONLINE_INCONSISTENT_RO
+    -->
+    <isolation>SERIALIZABLE_RW</isolation>
+
+    <!-- Основной запрос (запускается первым) -->
+    <query-main><![CDATA[
+SELECT sys_update_tv, id
+FROM my_documents VIEW ix_sys_update_tv
+WHERE sys_update_tv >= Timestamp('2021-01-01T00:00:00Z')
+  AND new_field IS NULL;
+-- Сортировка и ограничение количества записей отсутствует,
+-- так как в этом примере не используется страничная выборка
+-- для основного запроса.
+]]> </query-main>
+
+    <!-- Страничный запрос отсутствует, основной запрос извлекает все ключи. -->
+
+    <!-- Колонки для параметров запроса на обработку детализации -->
+    <input-details>
+        <column-name>id</column-name>
+    </input-details>
+
+    <!-- Запрос на обработку детализации. 
+         Принимает список ключей из основного и постраничного запросов.
+         Заполняет новое поле new_field корректными значениями.
+    -->
+    <query-details><![CDATA[
+DECLARE $input AS List<Struct<id:Text>>;
+SELECT
+    documents.*,
+    d1.attr1 AS d1_attr1,
+    d2.attr1 AS d2_attr1
+FROM AS_TABLE($input) AS input
+INNER JOIN my_documents VIEW PRIMARY KEY AS documents
+  ON input.id=documents.id
+LEFT JOIN my_dict1 AS d1
+  ON d1.key=documents.dict1
+LEFT JOIN my_dict2 AS d2
+  ON d2.key=documents.dict2
+WHERE documents.some_state IN ('ONE'u, 'TWO'u, 'THREE'u, 'FOUR'u)
+  AND documents.input_tv IS NOT NULL;
+]]> </query-details>
+
+</ydb-parallel-exporter>
