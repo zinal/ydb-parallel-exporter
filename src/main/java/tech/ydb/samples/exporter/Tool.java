@@ -535,7 +535,8 @@ public class Tool implements Runnable, AutoCloseable {
         }
 
         synchronized void updateOutput(ArrayList<Object[]> block) {
-            rowsOutput += block.size();
+            // minus one, because first row contains column names
+            rowsOutput += block.size() - 1;
             reportProgressIf();
         }
 
