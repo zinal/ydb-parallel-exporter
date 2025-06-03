@@ -83,6 +83,11 @@ public class Tool implements Runnable, AutoCloseable {
         } else {
             mainSingleRead();
         }
+        if (shouldRun.get()) {
+            LOG.info("Main query completed.");
+        } else {
+            LOG.error("Main query aborted due to background task errors.");
+        }
         waitJobs();
         shutdownExecutors();
         stats.reportProgress();
@@ -127,14 +132,6 @@ public class Tool implements Runnable, AutoCloseable {
 
     private void waitJobs() {
         while (numberOfJobsScheduled.get() > 0L) {
-            boolean hasFailures;
-            synchronized(jobFailures) {
-                hasFailures = (!jobFailures.isEmpty());
-            }
-            if (hasFailures) {
-                reportFailures();
-                throw new RuntimeException("At least one of sub-jobs failed");
-            }
             sleepMillis(50L);
         }
         LOG.info("Background scanner tasks completed.");
@@ -149,6 +146,14 @@ public class Tool implements Runnable, AutoCloseable {
                 throw new RuntimeException("Interrupted on output queue flush");
             }
             LOG.info("Output task completed.");
+        }
+        boolean hasFailures;
+        synchronized(jobFailures) {
+            hasFailures = (!jobFailures.isEmpty());
+        }
+        if (hasFailures) {
+            reportFailures();
+            throw new RuntimeException("At least one of sub-jobs failed");
         }
     }
 
@@ -207,12 +212,6 @@ public class Tool implements Runnable, AutoCloseable {
                             session.createQuery(job.getPageQuery(), getIsolation(), params))
             ).join().getValue();
         }
-
-        if (! shouldRun.get()) {
-            LOG.warn("Main query canceled.");
-        } else {
-            LOG.info("Main query completed.");
-        }
     }
 
     private StructValue collectPagedKey(QueryReader result) {
@@ -241,7 +240,6 @@ public class Tool implements Runnable, AutoCloseable {
                     .getStatus()
                     .expectSuccess("Main query failed");
         }
-        LOG.info("Main query completed.");
     }
 
     private void submitMainPart(ResultSetReader rsr) {
@@ -252,10 +250,12 @@ public class Tool implements Runnable, AutoCloseable {
     }
 
     private void processException(Throwable ex) {
-        shouldRun.set(false);
         synchronized(jobFailures) {
             jobFailures.add(ex);
         }
+        // This should be done AFTER adding ex to the exception list,
+        // because otherwise a race condition is possible on exit.
+        shouldRun.set(false);
     }
 
     private void processMainPart(ResultSetReader input) {
@@ -312,8 +312,8 @@ public class Tool implements Runnable, AutoCloseable {
         while (input.next()) {
             HashMap<String, Value<?>> m = new HashMap<>();
             for (int ix = 0; ix < indexes.length; ++ix) {
-                if (indexes[ix] > 0) {
-                    int index = indexes[ix];
+                int index = indexes[ix];
+                if (index >= 0) {
                     m.put(input.getColumnName(index), input.getColumn(index).getValue());
                 }
             }
