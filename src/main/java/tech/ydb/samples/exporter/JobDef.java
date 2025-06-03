@@ -7,8 +7,9 @@ import org.jdom2.Element;
 import tech.ydb.common.transaction.TxMode;
 
 /**
- *
- * @author mzinal
+ * Batch record processor job definition.
+ * 
+ * @author zinal
  */
 public class JobDef implements Serializable {
 
@@ -26,7 +27,10 @@ public class JobDef implements Serializable {
     
     public JobDef() {
     }
-    
+
+    /**
+     * @return true, if pageQuery is defined, and false otherwise
+     */
     public boolean hasPageQuery() {
         return pageQuery!=null && !pageQuery.isEmpty();
     }

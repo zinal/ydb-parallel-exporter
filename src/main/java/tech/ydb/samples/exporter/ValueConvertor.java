@@ -1,8 +1,6 @@
 package tech.ydb.samples.exporter;
 
 import org.apache.commons.codec.binary.Base64;
-import tech.ydb.table.result.ResultSetReader;
-import tech.ydb.table.result.ValueReader;
 import tech.ydb.table.values.DecimalValue;
 import tech.ydb.table.values.OptionalValue;
 import static tech.ydb.table.values.PrimitiveType.Bool;
@@ -10,10 +8,11 @@ import tech.ydb.table.values.PrimitiveValue;
 import tech.ydb.table.values.Value;
 
 /**
+ * Value conversion helper.
  *
- * @author mzinal
+ * @author zinal
  */
-public class ValueConvertor {
+class ValueConvertor {
     
     public static Object[] convertRecord(Value<?>[] output) {
         Object[] values = new Object[output.length];

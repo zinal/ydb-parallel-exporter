@@ -15,7 +15,7 @@ import org.jdom2.located.LocatedJDOMFactory;
  *
  * @author zinal
  */
-public abstract class JdomHelper {
+class JdomHelper {
 
     public static final String ATTR_FILE_NAME = "jdom-private-file-name";
 

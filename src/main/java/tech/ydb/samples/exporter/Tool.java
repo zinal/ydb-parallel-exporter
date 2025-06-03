@@ -33,7 +33,8 @@ import tech.ydb.table.values.StructValue;
 import tech.ydb.table.values.Value;
 
 /**
- *
+ * Batch record processor for YDB.
+ * 
  * @author zinal
  */
 public class Tool implements Runnable, AutoCloseable {
@@ -52,7 +53,7 @@ public class Tool implements Runnable, AutoCloseable {
 
     private final ArrayBlockingQueue<ArrayList<Object[]>> outputQueue;
     private final AtomicReference<Thread> outputThread  = new AtomicReference<>();
-    private final Stats stats = new Stats();
+    private final StatsKeeper stats = new StatsKeeper();
 
     public Tool(YdbConnector yc, JobDef job) {
         this.yc = yc;
@@ -510,139 +511,4 @@ public class Tool implements Runnable, AutoCloseable {
         }
     }
 
-    private static class RowSet {
-        final String[] names;
-        final HashMap<String, Integer> namesMap;
-        final Value<?>[][] values;
-        
-        boolean isEmpty() {
-            return names.length == 0 || values.length == 0;
-        }
-        
-        int getRowCount() {
-            return values.length;
-        }
-        
-        int getColumnCount() {
-            return names.length;
-        }
-        
-        int getColumnIndex(String name) {
-            Integer ix = namesMap.get(name);
-            if (ix==null) {
-                return -1;
-            }
-            return ix;
-        }
-
-        Value<?> getValue(int row, int column) {
-            if (row < 0 || row >= values.length) {
-                throw new IllegalArgumentException("Illegal row number "
-                        + String.valueOf(row) + ", row count "
-                        + String.valueOf(values.length));
-            }
-            if (column < 0 || column >= names.length) {
-                throw new IllegalArgumentException("Illegal column number "
-                        + String.valueOf(column) + ", column count "
-                        + String.valueOf(names.length));
-            }
-            return values[row][column];
-        }
-
-        Value<?> getValue(int row, String name) {
-            Integer index = namesMap.get(name);
-            if (index==null) {
-                throw new IllegalArgumentException("Unknown column: " + name);
-            }
-            return getValue(row, index);
-        }
-
-        RowSet(ResultSetReader rsr) {
-            this.namesMap = new HashMap<>();
-            this.names = new String[rsr.getColumnCount()];
-            for (int i = 0; i < rsr.getColumnCount(); ++i) {
-                this.names[i] = rsr.getColumnName(i);
-                this.namesMap.put(this.names[i], i);
-            }
-            this.values = new Value<?>[rsr.getRowCount()][];
-            int row = 0;
-            while (rsr.next()) {
-                Value<?>[] cur = new Value<?>[this.names.length];
-                for (int i = 0; i < this.names.length; ++i) {
-                    cur[i] = rsr.getColumn(i).getValue();
-                }
-                this.values[row] = cur;
-                row++;
-            }
-        }
-    }
-
-    private static class Stats {
-        long rowsInput = 0L;
-        long rowsInside = 0L;
-        long rowsOutput = 0L;
-        long rowsInputPrev = 0L;
-        long rowsInsidePrev = 0L;
-        long rowsOutputPrev = 0L;
-        long tvLast = 0L;
-
-        synchronized void start() {
-            tvLast = System.currentTimeMillis();
-            rowsInput = 0L;
-            rowsOutput = 0L;
-            rowsInputPrev = 0L;
-            rowsOutputPrev = 0L;
-        }
-
-        synchronized void updateInput(RowSet datum) {
-            rowsInput += datum.getRowCount();
-            reportProgressIf();
-        }
-
-        synchronized void updateInside(Value<?>[] block) {
-            rowsInside += block.length;
-            reportProgressIf();
-        }
-
-        synchronized void updateOutput(ArrayList<Object[]> block) {
-            // minus one, because first row contains column names
-            rowsOutput += block.size() - 1;
-            reportProgressIf();
-        }
-
-        synchronized void reportProgress() {
-            long tv = System.currentTimeMillis();
-            printStats(tv);
-            saveState(tv);
-        }
-
-        private void saveState(long tv) {
-            tvLast = tv;
-            rowsInputPrev = rowsInput;
-            rowsInsidePrev = rowsInside;
-            rowsOutputPrev = rowsOutput;
-        }
-
-        private void reportProgressIf() {
-            long tv = System.currentTimeMillis();
-            if (tv - tvLast >= 10000L) {
-                printStats(tv);
-                saveState(tv);
-            }
-        }
-
-        private void printStats(long tv) {
-            long input = rowsInput - rowsInputPrev;
-            long inside = rowsInside - rowsInsidePrev;
-            long output = rowsOutput - rowsOutputPrev;
-            long millis = tv - tvLast;
-            double rateInput = ((double)input) * 1000.0 / ((double)millis);
-            double rateInside = ((double)inside) * 1000.0 / ((double)millis);
-            double rateOutput = ((double)output) * 1000.0 / ((double)millis);
-            LOG.info("PROGRESS (in/bw/out) {}/{}/{} rows, {}/{}/{} rps. Total {} input, {} output rows.",
-                    input, inside, output, String.format("%.2f", rateInput),
-                    String.format("%.2f", rateInside), String.format("%.2f", rateOutput),
-                    rowsInput, rowsOutput);
-        }
-    }
 }
