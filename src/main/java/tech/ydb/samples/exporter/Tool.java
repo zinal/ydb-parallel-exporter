@@ -23,6 +23,7 @@ import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 import tech.ydb.common.transaction.TxMode;
 import tech.ydb.query.QuerySession;
+import tech.ydb.query.result.QueryResultPart;
 import tech.ydb.query.tools.QueryReader;
 import tech.ydb.query.tools.SessionRetryContext;
 import tech.ydb.table.query.Params;
@@ -198,14 +199,20 @@ public class Tool implements Runnable, AutoCloseable {
         ).join().getValue();
 
         while (shouldRun.get()) {
+            StructValue input = null;
             for (int pos = 0; pos < result.getResultSetCount(); ++pos) {
-                submitMainPart(result.getResultSet(pos));
+                RowSet datum = new RowSet(result.getResultSet(pos));
+                StructValue curInput = collectPagedKey(datum);
+                if (curInput != null) {
+                    input = curInput;
+                }
+                submitMainPart(datum);
             }
-            StructValue input = collectPagedKey(result);
             if (input==null) {
                 // Empty input means end of data.
                 break;
             }
+            LOG.debug("Next page with key: {}", input);
             Params params = Params.of("$input", input);
             result = retryCtx.supplyResult(
                     session -> QueryReader.readFrom(
@@ -214,38 +221,37 @@ public class Tool implements Runnable, AutoCloseable {
         }
     }
 
-    private StructValue collectPagedKey(QueryReader result) {
-        StructValue sv = null;
-        for (int pos = 0; pos < result.getResultSetCount(); ++pos) {
-            ResultSetReader rsr = result.getResultSet(pos);
-            if (rsr.getRowCount()==0) {
-                continue;
-            }
-            rsr.setRowIndex(rsr.getRowCount() - 1);
-            HashMap<String,Value<?>> m = new HashMap<>();
-            for (String column : job.getPageInput()) {
-                m.put(column, rsr.getColumn(column).getValue());
-            }
-            sv = StructValue.of(m);
+    private StructValue collectPagedKey(RowSet datum) {
+        if (datum.isEmpty()) {
+            return null;
         }
-        return sv;
+        int rownum = datum.getRowCount() - 1;
+        HashMap<String,Value<?>> m = new HashMap<>();
+        for (String column : job.getPageInput()) {
+            m.put(column, datum.getValue(rownum, column));
+        }
+        return StructValue.of(m);
     }
 
     private void mainSingleRead() {
         LOG.info("Performing single-action read for the main query.");
         try (QuerySession qs = yc.createQuerySession()) {
             qs.createQuery(job.getMainQuery(), getIsolation())
-                    .execute(part -> submitMainPart(part.getResultSetReader()))
+                    .execute(part -> submitMainPart(part))
                     .join()
                     .getStatus()
                     .expectSuccess("Main query failed");
         }
     }
 
-    private void submitMainPart(ResultSetReader rsr) {
+    private void submitMainPart(QueryResultPart qrp) {
+        submitMainPart(new RowSet(qrp.getResultSetReader()));
+    }
+
+    private void submitMainPart(RowSet input) {
         if (shouldRun.get()) {
-            stats.updateInput(rsr);
-            es.get().submit(new PartWorker(rsr));
+            stats.updateInput(input);
+            es.get().submit(new PartWorker(input));
         }
     }
 
@@ -258,11 +264,10 @@ public class Tool implements Runnable, AutoCloseable {
         shouldRun.set(false);
     }
 
-    private void processMainPart(ResultSetReader input) {
+    private void processMainPart(RowSet input) {
         if (input.getRowCount() < 1) {
             return;
         }
-        input.setRowIndex(0);
         Value<?>[] rows;
         if (job.getDetailsInput().isEmpty()) {
             rows = collectDetailsKeys1(input);
@@ -285,39 +290,36 @@ public class Tool implements Runnable, AutoCloseable {
         }
     }
 
-    private Value<?>[] collectDetailsKeys1(ResultSetReader input) {
+    private Value<?>[] collectDetailsKeys1(RowSet input) {
         Value<?>[] rows = new StructValue[input.getRowCount()];
-        int rownum = 0;
-        while (input.next()) {
+        for (int rownum = 0; rownum < input.getRowCount(); ++rownum) {
             HashMap<String, Value<?>> m = new HashMap<>();
             for (int column = 0; column < input.getColumnCount(); ++column) {
-                m.put(input.getColumnName(column), input.getColumn(column).getValue());
+                m.put(input.names[column], input.getValue(rownum, column));
             }
-            rows[rownum++] = StructValue.of(m);
+            rows[rownum] = StructValue.of(m);
         }
         return rows;
     }
 
-    private Value<?>[] collectDetailsKeys2(ResultSetReader input) {
+    private Value<?>[] collectDetailsKeys2(RowSet input) {
         Value<?>[] rows = new StructValue[input.getRowCount()];
         int[] indexes = new int[job.getDetailsInput().size()];
         for (int ix = 0; ix < indexes.length; ++ix) {
             String column = job.getDetailsInput().get(ix);
             indexes[ix] = input.getColumnIndex(column);
             if (indexes[ix] < 0) {
-                LOG.warn("Missing column {} in main query output", column);
+                throw new RuntimeException("Missing column `" + column
+                        + "` in main query output");
             }
         }
-        int rownum = 0;
-        while (input.next()) {
+        for (int rownum = 0; rownum < input.getRowCount(); ++rownum) {
             HashMap<String, Value<?>> m = new HashMap<>();
             for (int ix = 0; ix < indexes.length; ++ix) {
                 int index = indexes[ix];
-                if (index >= 0) {
-                    m.put(input.getColumnName(index), input.getColumn(index).getValue());
-                }
+                m.put(input.names[index], input.getValue(rownum, index));
             }
-            rows[rownum++] = StructValue.of(m);
+            rows[rownum] = StructValue.of(m);
         }
         return rows;
     }
@@ -335,22 +337,22 @@ public class Tool implements Runnable, AutoCloseable {
     private void pushDetailsToOutput(QueryReader output) {
         for (int i = 0; i < output.getResultSetCount(); ++i) {
             ResultSetReader rsr = output.getResultSet(i);
-            pushDetailsToOutput(rsr);
+            pushDetailsToOutput(new RowSet(rsr));
         }
     }
 
-    private void pushDetailsToOutput(ResultSetReader output) {
+    private void pushDetailsToOutput(RowSet output) {
         if (output.getRowCount() < 1) {
             return;
         }
         String[] columnNames = new String[output.getColumnCount()];
         for (int column = 0; column < output.getColumnCount(); ++column) {
-            columnNames[column] = output.getColumnName(column);
+            columnNames[column] = output.names[column];
         }
         ArrayList<Object[]> batch = new ArrayList<>(1 + output.getRowCount());
         batch.add(columnNames);
-        while (output.next()) {
-            batch.add(ValueConvertor.convertRecord(output));
+        for (int rownum = 0; rownum < output.getRowCount(); ++rownum) {
+            batch.add(ValueConvertor.convertRecord(output.values[rownum]));
         }
         while (shouldRun.get()) {
             try {
@@ -489,24 +491,91 @@ public class Tool implements Runnable, AutoCloseable {
     }
 
     private class PartWorker implements Runnable {
-        private final ResultSetReader rsr;
+        private final RowSet datum;
 
-        public PartWorker(ResultSetReader rsr) {
-            this.rsr = rsr;
+        public PartWorker(RowSet datum) {
+            this.datum = datum;
             numberOfJobsScheduled.incrementAndGet();
         }
 
         @Override
         public void run() {
             try {
-                processMainPart(rsr);
+                processMainPart(datum);
             } catch(Exception ex) {
                 processException(ex);
             }
             numberOfJobsScheduled.decrementAndGet();
         }
     }
-    
+
+    private static class RowSet {
+        final String[] names;
+        final HashMap<String, Integer> namesMap;
+        final Value<?>[][] values;
+        
+        boolean isEmpty() {
+            return names.length == 0 || values.length == 0;
+        }
+        
+        int getRowCount() {
+            return values.length;
+        }
+        
+        int getColumnCount() {
+            return names.length;
+        }
+        
+        int getColumnIndex(String name) {
+            Integer ix = namesMap.get(name);
+            if (ix==null) {
+                return -1;
+            }
+            return ix;
+        }
+
+        Value<?> getValue(int row, int column) {
+            if (row < 0 || row >= values.length) {
+                throw new IllegalArgumentException("Illegal row number "
+                        + String.valueOf(row) + ", row count "
+                        + String.valueOf(values.length));
+            }
+            if (column < 0 || column >= names.length) {
+                throw new IllegalArgumentException("Illegal column number "
+                        + String.valueOf(column) + ", column count "
+                        + String.valueOf(names.length));
+            }
+            return values[row][column];
+        }
+
+        Value<?> getValue(int row, String name) {
+            Integer index = namesMap.get(name);
+            if (index==null) {
+                throw new IllegalArgumentException("Unknown column: " + name);
+            }
+            return getValue(row, index);
+        }
+
+        RowSet(ResultSetReader rsr) {
+            this.namesMap = new HashMap<>();
+            this.names = new String[rsr.getColumnCount()];
+            for (int i = 0; i < rsr.getColumnCount(); ++i) {
+                this.names[i] = rsr.getColumnName(i);
+                this.namesMap.put(this.names[i], i);
+            }
+            this.values = new Value<?>[rsr.getRowCount()][];
+            int row = 0;
+            while (rsr.next()) {
+                Value<?>[] cur = new Value<?>[this.names.length];
+                for (int i = 0; i < this.names.length; ++i) {
+                    cur[i] = rsr.getColumn(i).getValue();
+                }
+                this.values[row] = cur;
+                row++;
+            }
+        }
+    }
+
     private static class Stats {
         long rowsInput = 0L;
         long rowsInside = 0L;
@@ -524,8 +593,8 @@ public class Tool implements Runnable, AutoCloseable {
             rowsOutputPrev = 0L;
         }
 
-        synchronized void updateInput(ResultSetReader rsr) {
-            rowsInput += rsr.getRowCount();
+        synchronized void updateInput(RowSet datum) {
+            rowsInput += datum.getRowCount();
             reportProgressIf();
         }
 

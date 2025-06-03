@@ -15,19 +15,18 @@ import tech.ydb.table.values.Value;
  */
 public class ValueConvertor {
     
-    public static Object[] convertRecord(ResultSetReader output) {
-        Object[] values = new Object[output.getColumnCount()];
-        for (int i = 0; i < output.getColumnCount(); ++i) {
-            values[i] = convert(output.getColumn(i));
+    public static Object[] convertRecord(Value<?>[] output) {
+        Object[] values = new Object[output.length];
+        for (int i = 0; i < output.length; ++i) {
+            values[i] = convert(output[i]);
         }
         return values;
     }
 
-    public static Object convert(ValueReader vr) {
-        if (vr==null) {
-            return "";
+    public static Object convert(Value<?> value) {
+        if (value==null) {
+            return null;
         }
-        Value<?> value = vr.getValue();
         if (value instanceof OptionalValue ov) {
             if (ov.isPresent()) {
                 value = ov.get();
