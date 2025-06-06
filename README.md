@@ -15,11 +15,12 @@ Phase 2 is executed using the configurable executor pool, providing parallel exe
 ## Running the tool as a standalone program
 
 ```bash
-./Run.sh connection.xml jobdef.xml
+./Run.sh connection.xml jobdef.xml vars.sh
 ```
 
 * The first parameter should point to the file with the connection parameters.
 * The second parameter should point to the file with the job definition.
+* The optional third parameter can be missing, or should point to the file with the substitution variables.
 
 ## Embedding the tool into the user program
 
@@ -30,10 +31,10 @@ JobDef job = new JobDef();
 job.setMainQuery("SELECT ...");
 job.setDetailsQuery("SELECT ...");
 ...
-Properties props = new Properties();
-props.setProperty("ydb.url", "grpcs://ydb01.localdomain:2135/cluster1/testdb");
+Properties propsConn = new Properties();
+propsConn.setProperty("ydb.url", "grpcs://ydb01.localdomain:2135/cluster1/testdb");
 ...
-try (YdbConnector yc = new YdbConnector(props)) {
+try (YdbConnector yc = new YdbConnector(propsConn)) {
     try (Tool app = new Tool(yc, job)) {
         app.run();
     }
@@ -140,4 +141,25 @@ WHERE documents.some_state IN ('ONE'u, 'TWO'u, 'THREE'u, 'FOUR'u)
   AND documents.input_tv IS NOT NULL;
 ]]> </query-details>
 </ydb-parallel-exporter>
+```
+
+## Substitution variables
+
+The tool can optionally apply variable substitutions to the XML file with job definition.
+
+Substitutions are applied after parsing the XML content (so the file needs to be a valid XML before substititions), but before converting it to the job definition.
+
+The variables can be specified as `${varname}` in attribute values, text values and CDATA section values, but not in the tag names or attribute names.
+
+Example properies file containing some sobstitution variables:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<properties>
+<entry key="file_name">output_with_some_suffix.csv</entry>
+<entry key="worker_count">10</entry>
+<entry key="start_time">2020-01-01T00:00:00Z</entry>
+<entry key="finish_time">2026-01-01T00:00:00Z</entry>
+</properties>
 ```
