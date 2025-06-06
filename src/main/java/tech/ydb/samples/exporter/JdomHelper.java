@@ -1,10 +1,13 @@
 package tech.ydb.samples.exporter;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import org.apache.commons.text.StringSubstitutor;
+import org.apache.commons.text.matcher.StringMatcher;
 
 import org.jdom2.Element;
 import org.jdom2.input.SAXBuilder;
@@ -64,9 +67,25 @@ class JdomHelper {
         return readDocument(new File(fileName));
     }
 
+    public static Element readDocument(byte[] input, String fileName) {
+        try (ByteArrayInputStream fis = new ByteArrayInputStream(input)) {
+            Element root = new SAXBuilder(null, null, new LocatedJDOMFactory())
+                    .build(fis).detachRootElement();
+            root.setAttribute(ATTR_FILE_NAME, fileName);
+            return root;
+        } catch(Exception ex) {
+            throw new RuntimeException("Failed to read translated document " + fileName, ex);
+        }
+    }
+    
+    public static void replacePatterns(Element root, StringSubstitutor ss) {
+        StringMatcher matcher = ss.getVariablePrefixMatcher();
+        root.getAttributes();
+        root.getChildren();
+    }
+
     public static String getPosition(Element el) {
-        if (el instanceof Located) {
-            Located l = (Located) el;
+        if (el instanceof Located l) {
             return "line " + String.valueOf(l.getLine())
                     + ", column " + String.valueOf(l.getColumn());
         } else {

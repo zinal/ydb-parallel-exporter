@@ -9,7 +9,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
-        <exec.mainClass>tech.ydb.samples.exporter.Tool</exec.mainClass>
+        <exec.mainClass>tech.ydb.samples.exporter.App</exec.mainClass>
     </properties>
     <dependencies>
         <dependency>
@@ -54,6 +54,11 @@
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-csv</artifactId>
             <version>1.14.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-text</artifactId>
+            <version>1.13.1</version>
         </dependency>
         <dependency>
             <groupId>junit</groupId>

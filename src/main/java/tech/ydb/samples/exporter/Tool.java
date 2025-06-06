@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.io.Writer;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -21,6 +22,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
+import org.apache.commons.csv.QuoteMode;
 import tech.ydb.common.transaction.TxMode;
 import tech.ydb.query.QuerySession;
 import tech.ydb.query.result.QueryResultPart;
@@ -383,19 +385,30 @@ public class Tool implements Runnable, AutoCloseable {
         }
         return sb;
     }
-    
+
+    private CSVPrinter newPrinter(StringBuilder sb) throws IOException {
+        if (JobDef.Format.TSV.equals(job.getOutputFormat())) {
+            return new CSVPrinter(sb, CSVFormat.TDF);
+        }
+        if (JobDef.Format.CUSTOM1.equals(job.getOutputFormat())) {
+            CSVFormat format = CSVFormat.Builder.create()
+                    .setDelimiter(new String(Character.toChars(0x19)))
+                    .setRecordSeparator(new String(Character.toChars(0x0A)))
+                    .setQuoteMode(QuoteMode.MINIMAL)
+                    .setTrim(true)
+                    .get();
+            return new CSVPrinter(sb, format);
+        } else {
+            return new CSVPrinter(sb, CSVFormat.RFC4180);
+        }
+    }
+
     private CharSequence formatCsv(boolean first, ArrayList<Object[]> block) {
         if (block.size() <= 1) {
             return "";
         }
         final StringBuilder sb = new StringBuilder();
-        try {
-            CSVPrinter cp;
-            if (JobDef.Format.TSV.equals(job.getOutputFormat())) {
-                cp = new CSVPrinter(sb, CSVFormat.TDF);
-            } else {
-                cp = new CSVPrinter(sb, CSVFormat.RFC4180);
-            }
+        try (CSVPrinter cp = newPrinter(sb)) {
             if (first) {
                 cp.printRecord(Arrays.asList(block.get(0)));
             }
@@ -406,24 +419,6 @@ public class Tool implements Runnable, AutoCloseable {
             throw new RuntimeException("Failed to format CSV block", iox);
         }
         return sb;
-    }
-
-    public static void main(String[] args) {
-        if (args.length != 2) {
-            System.out.println("USAGE: Tool connection.xml job.xml");
-            System.exit(1);
-        }
-        try {
-            YdbConnector.Config ycc = YdbConnector.Config.fromFile(args[0]);
-            JobDef job = JobDef.fromXml(args[1]);
-            try (YdbConnector yc = new YdbConnector(ycc)) {
-                try (Tool app = new Tool(yc, job)) {
-                    app.run();
-                }
-            }
-        } catch(Exception ex) {
-            LOG.error("FATAL", ex);
-        }
     }
 
     private class OutputWorker implements Runnable {
@@ -438,8 +433,13 @@ public class Tool implements Runnable, AutoCloseable {
                 this.own = false;
                 LOG.info("Rows output configured to STDOUT.");
             } else {
+                Charset charset = StandardCharsets.UTF_8;
+                if (job.getOutputEncoding() != null
+                        && job.getOutputEncoding().length() > 0) {
+                    charset = Charset.forName(job.getOutputEncoding());
+                }
                 this.writer = new OutputStreamWriter(
-                                new FileOutputStream(fname), StandardCharsets.UTF_8);
+                                new FileOutputStream(fname), charset);
                 this.own = true;
                 LOG.info("Rows output configured to file {}", fname);
             }

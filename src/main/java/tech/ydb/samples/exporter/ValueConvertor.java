@@ -3,7 +3,6 @@ package tech.ydb.samples.exporter;
 import org.apache.commons.codec.binary.Base64;
 import tech.ydb.table.values.DecimalValue;
 import tech.ydb.table.values.OptionalValue;
-import static tech.ydb.table.values.PrimitiveType.Bool;
 import tech.ydb.table.values.PrimitiveValue;
 import tech.ydb.table.values.Value;
 
@@ -79,6 +78,9 @@ class ValueConvertor {
                 }
                 case Uint64 -> {
                     return pv.getUint64();
+                }
+                default -> {
+                    return pv.toString();
                 }
             }
         }

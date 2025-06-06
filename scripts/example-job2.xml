@@ -13,6 +13,9 @@
     <output-format>CSV</output-format>
     <!-- Имя выходного файла, значение '-' выводит на стандартный поток вывода -->
     <output-file>-</output-file>
+    <!-- Кодировка выходного файла, UTF-8, windows-1251. Для stdout не устанавливается
+    <output-encoding>windows-1251</output-encoding>
+    -->
 
     <!-- Используемый уровень изоляции транзакций:
        SERIALIZABLE_RW   (по умолчанию, если тег отсутствует)
@@ -27,7 +30,7 @@
     <query-main><![CDATA[
 SELECT sys_update_tv, id
 FROM my_documents VIEW ix_sys_update_tv
-WHERE sys_update_tv >= Timestamp('2021-01-01T00:00:00Z')
+WHERE sys_update_tv >= Timestamp('${start_time}')
   AND new_field IS NULL;
 -- Сортировка и ограничение количества записей отсутствует,
 -- так как в этом примере не используется страничная выборка
@@ -58,7 +61,7 @@ LEFT JOIN my_dict1 AS d1
   ON d1.key=documents.dict1
 LEFT JOIN my_dict2 AS d2
   ON d2.key=documents.dict2
-WHERE documents.some_state IN ('ONE'u, 'TWO'u, 'THREE'u, 'FOUR'u)
+WHERE documents.some_state IN (${valid_states})
   AND documents.input_tv IS NOT NULL;
 ]]> </query-details>
 

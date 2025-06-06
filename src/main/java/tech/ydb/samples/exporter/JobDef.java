@@ -1,8 +1,14 @@
 package tech.ydb.samples.exporter;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Properties;
+import org.apache.commons.text.StringSubstitutor;
 import org.jdom2.Element;
 import tech.ydb.common.transaction.TxMode;
 
@@ -24,6 +30,7 @@ public class JobDef implements Serializable {
     private int detailsBatchLimit = -1;
     private Format outputFormat = Format.CSV;
     private String outputFile = "-"; // stdout
+    private String outputEncoding = null;
     
     public JobDef() {
     }
@@ -115,9 +122,29 @@ public class JobDef implements Serializable {
         this.outputFile = outputFile;
     }
 
+    public String getOutputEncoding() {
+        return outputEncoding;
+    }
+
+    public void setOutputEncoding(String outputEncoding) {
+        this.outputEncoding = outputEncoding;
+    }
+
     public static JobDef fromXml(String fname) throws IOException {
+        return fromXml(JdomHelper.readDocument(fname));
+    }
+
+    public static JobDef fromXml(String fname, Properties props) throws IOException {
+        if (props==null || props.isEmpty()) {
+            return fromXml(fname);
+        }
+        Element elRoot = JdomHelper.readDocument(fname);
+        elRoot = JdomExpander.expand(elRoot, props);
+        return fromXml(elRoot);
+    }
+
+    public static JobDef fromXml(Element docRoot) {
         JobDef job = new JobDef();
-        Element docRoot = JdomHelper.readDocument(fname);
         Element el;
         el = JdomHelper.getOneChild(docRoot, "worker-count");
         if (el!=null) {
@@ -162,6 +189,10 @@ public class JobDef implements Serializable {
         if (el!=null) {
             job.setOutputFile(JdomHelper.getText(el));
         }
+        el = JdomHelper.getOneChild(docRoot, "output-encoding");
+        if (el!=null) {
+            job.setOutputEncoding(JdomHelper.getText(el));
+        }
         job.setMainQuery(JdomHelper.getText(docRoot, "query-main"));
         Element elPageQuery = JdomHelper.getOneChild(docRoot, "query-page");
         if (elPageQuery != null) {
@@ -188,6 +219,7 @@ public class JobDef implements Serializable {
     }
     
     public static enum Format {
+        CUSTOM1,
         CSV,
         TSV,
         JSON

@@ -9,10 +9,12 @@
     <queue-size>100</queue-size>
     <!-- Ограничение на размер пачки ключей, передаваемой в запрос на обработку детализации -->
     <batch-limit>1000</batch-limit>
-    <!-- Выходной формат, варианты: CSV, TSV, JSON -->
-    <output-format>CSV</output-format>
+    <!-- Выходной формат, варианты: CSV, TSV, JSON, CUSTOM1 -->
+    <output-format>CUSTOM1</output-format>
     <!-- Имя выходного файла, значение '-' выводит на стандартный поток вывода -->
     <output-file>example1.csv</output-file>
+    <!-- Кодировка выходного файла, UTF-8, windows-1251 -->
+    <output-encoding>windows-1251</output-encoding>
 
     <!-- Используемый уровень изоляции транзакций:
        SERIALIZABLE_RW   (по умолчанию, если тег отсутствует)

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<properties>
+<comment>Пример файла подстановочных переменных</comment>
+
+<entry key="start_time">2021-01-01T00:00:00Z</entry>
+<entry key="valid_states">'ONE'u, 'TWO'u, 'THREE'u, 'FOUR'u</entry>
+
+</properties>
