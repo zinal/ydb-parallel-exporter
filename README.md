@@ -15,12 +15,16 @@ Phase 2 is executed using the configurable executor pool, providing parallel exe
 ## Running the tool as a standalone program
 
 ```bash
-./Run.sh connection.xml jobdef.xml vars.sh
+./Run.sh connection.xml jobdef.xml
+... or ...
+./Run.sh connection.xml jobdef.xml vars.xml
 ```
 
 * The first parameter should point to the file with the connection parameters.
 * The second parameter should point to the file with the job definition.
 * The optional third parameter can be missing, or should point to the file with the substitution variables.
+
+For information about the substitution variables, see the section at the end of the README file.
 
 ## Embedding the tool into the user program
 
