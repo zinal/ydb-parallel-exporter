@@ -1,5 +1,7 @@
 # YDB parallel records batch processor
 
+[See the Releases page for downloads](https://github.com/zinal/ydb-parallel-exporter/releases).
+
 This tool provides basic capabilities for parallel job processing of records stored in [YDB](https://ydb.tech) tables.
 It can be used as a standalone program, or embedded into the user application (which needs to be based on Java-compatible stack) as a library.
 
