@@ -6,8 +6,6 @@ import java.io.FileInputStream;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import org.apache.commons.text.StringSubstitutor;
-import org.apache.commons.text.matcher.StringMatcher;
 
 import org.jdom2.Element;
 import org.jdom2.input.SAXBuilder;
@@ -78,12 +76,6 @@ class JdomHelper {
         }
     }
     
-    public static void replacePatterns(Element root, StringSubstitutor ss) {
-        StringMatcher matcher = ss.getVariablePrefixMatcher();
-        root.getAttributes();
-        root.getChildren();
-    }
-
     public static String getPosition(Element el) {
         if (el instanceof Located l) {
             return "line " + String.valueOf(l.getLine())

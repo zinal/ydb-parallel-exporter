@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Пример файла настроек задания удаления данных -->
+<ydb-parallel-exporter>
+    <!-- Количество потоков для оператора удаления -->
+    <worker-count>10</worker-count>
+    <queue-size>100</queue-size>
+    <!-- Удаляем до 1000 ключей за один вызов -->
+    <batch-limit>1000</batch-limit>
+    <!-- Вывод не используется, но формально должен присутствовать -->
+    <output-format>TSV</output-format>
+    <output-file>-</output-file>
+
+    <!-- Полное сканирование входной таблицы + отбор нужных записей по условию. -->
+    <query-main><![CDATA[
+SELECT id FROM some_table
+WHERE 3 = Digest::Crc32c(id) % 10 -- Условие отбора удаляемых записей
+ORDER BY id; -- Сортировка по первичному ключу
+]]> </query-main>
+
+    <input-details>
+        <column-name>id</column-name>
+    </input-details>
+
+    <!-- Оператор удаления -->
+    <query-details><![CDATA[
+DECLARE $input AS List<Struct<id:Text>>;
+DELETE FROM some_table
+  ON SELECT * FROM AS_TABLE($input);
+]]> </query-details>

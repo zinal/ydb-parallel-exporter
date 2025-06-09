@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Пример файла настроек задания заполнения нового поля в таблице -->
+<ydb-parallel-exporter>
+    <!-- Количество потоков для оператора обновления -->
+    <worker-count>10</worker-count>
+    <queue-size>100</queue-size>
+    <!-- Обновляем до 1000 записей за один вызов -->
+    <batch-limit>1000</batch-limit>
+    <!-- Вывод не используется, но формально должен присутствовать -->
+    <output-format>TSV</output-format>
+    <output-file>-</output-file>
+
+    <!-- Полное сканирование входной таблицы + отбор нужных записей по условию. -->
+    <query-main><![CDATA[
+SELECT id FROM some_table
+WHERE new_field IS NULL -- Признак пустоты поля как условие отбора записей
+ORDER BY id; -- Сортировка по первичному ключу
+]]> </query-main>
+
+    <input-details>
+        <column-name>id</column-name>
+    </input-details>
+
+    <!-- Оператор заполнения полей -->
+    <query-details><![CDATA[
+DECLARE $input AS List<Struct<id:Text>>;
+UPSERT INTO some_table
+  SELECT i.id AS id,
+      t.old_field1 || ' 'u || t.old_field2 AS new_field
+  FROM AS_TABLE($input) AS i
+  JOIN some_table AS t
+    ON t.id = i.id;
+]]> </query-details>

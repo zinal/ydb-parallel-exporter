@@ -1,14 +1,9 @@
 package tech.ydb.samples.exporter;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Properties;
-import org.apache.commons.text.StringSubstitutor;
 import org.jdom2.Element;
 import tech.ydb.common.transaction.TxMode;
 
