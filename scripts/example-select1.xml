@@ -26,7 +26,7 @@
     <isolation>SNAPSHOT_RO</isolation>
 
     <!-- Основной запрос (запускается первым) -->
-    <query-main><![CDATA[
+    <query-main timeout="5000"><![CDATA[
 SELECT sys_update_tv, id
 FROM my_documents VIEW ix_sys_update_tv
 WHERE sys_update_tv >= Timestamp('2021-01-01T00:00:00Z')
@@ -44,7 +44,7 @@ LIMIT 1000;
     </input-page>
 
     <!-- Страничный запрос (на выборку следующей страницы данных) -->
-    <query-page><![CDATA[
+    <query-page timeout="5000"><![CDATA[
 DECLARE $input AS Struct<sys_update_tv:Timestamp?, id:Text>;
 SELECT sys_update_tv, id
 FROM my_documents VIEW ix_sys_update_tv
@@ -68,7 +68,7 @@ LIMIT 1000;
          Извлекаемые записи выводятся в настроенном формате.
          Может выполнять модификации данных.
     -->
-    <query-details><![CDATA[
+    <query-details timeout="5000"><![CDATA[
 DECLARE $input AS List<Struct<id:Text>>;
 SELECT
     documents.*,

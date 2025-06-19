@@ -27,7 +27,7 @@
     <isolation>SERIALIZABLE_RW</isolation>
 
     <!-- Основной запрос (запускается первым) -->
-    <query-main><![CDATA[
+    <query-main timeout="120000"><![CDATA[
 SELECT sys_update_tv, id
 FROM my_documents VIEW ix_sys_update_tv
 WHERE sys_update_tv >= Timestamp('${start_time}')
@@ -48,7 +48,7 @@ WHERE sys_update_tv >= Timestamp('${start_time}')
          Принимает список ключей из основного и постраничного запросов.
          Заполняет новое поле new_field корректными значениями.
     -->
-    <query-details><![CDATA[
+    <query-details timeout="5000"><![CDATA[
 DECLARE $input AS List<Struct<id:Text>>;
 SELECT
     documents.*,

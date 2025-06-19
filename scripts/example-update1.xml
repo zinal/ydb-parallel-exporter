@@ -11,7 +11,7 @@
     <output-file>-</output-file>
 
     <!-- Полное сканирование входной таблицы + отбор нужных записей по условию. -->
-    <query-main><![CDATA[
+    <query-main timeout="120000"><![CDATA[
 SELECT id FROM some_table
 WHERE new_field IS NULL -- Признак пустоты поля как условие отбора записей
 ORDER BY id; -- Сортировка по первичному ключу
@@ -22,7 +22,7 @@ ORDER BY id; -- Сортировка по первичному ключу
     </input-details>
 
     <!-- Оператор заполнения полей -->
-    <query-details><![CDATA[
+    <query-details timeout="10000"><![CDATA[
 DECLARE $input AS List<Struct<id:Text>>;
 UPSERT INTO some_table
   SELECT i.id AS id,
@@ -31,3 +31,5 @@ UPSERT INTO some_table
   JOIN some_table AS t
     ON t.id = i.id;
 ]]> </query-details>
+
+</ydb-parallel-exporter>

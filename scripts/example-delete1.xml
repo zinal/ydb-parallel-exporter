@@ -11,7 +11,7 @@
     <output-file>-</output-file>
 
     <!-- Полное сканирование входной таблицы + отбор нужных записей по условию. -->
-    <query-main><![CDATA[
+    <query-main timeout="120000"><![CDATA[
 SELECT id FROM some_table
 WHERE 3 = Digest::Crc32c(id) % 10 -- Условие отбора удаляемых записей
 ORDER BY id; -- Сортировка по первичному ключу
@@ -22,8 +22,10 @@ ORDER BY id; -- Сортировка по первичному ключу
     </input-details>
 
     <!-- Оператор удаления -->
-    <query-details><![CDATA[
+    <query-details timeout="10000"><![CDATA[
 DECLARE $input AS List<Struct<id:Text>>;
 DELETE FROM some_table
   ON SELECT * FROM AS_TABLE($input);
 ]]> </query-details>
+
+</ydb-parallel-exporter>

@@ -26,6 +26,7 @@ import org.apache.commons.csv.QuoteMode;
 import tech.ydb.common.transaction.TxMode;
 import tech.ydb.query.QuerySession;
 import tech.ydb.query.result.QueryResultPart;
+import tech.ydb.query.settings.ExecuteQuerySettings;
 import tech.ydb.query.tools.QueryReader;
 import tech.ydb.query.tools.SessionRetryContext;
 import tech.ydb.table.query.Params;
@@ -60,7 +61,10 @@ public class Tool implements Runnable, AutoCloseable {
     public Tool(YdbConnector yc, JobDef job) {
         this.yc = yc;
         this.job = job;
-        this.retryCtx = SessionRetryContext.create(yc.getQueryClient()).build();
+        this.retryCtx = SessionRetryContext.create(yc.getQueryClient())
+                .idempotent(true)
+                .maxRetries(10)
+                .build();
         this.gson = new Gson();
         this.outputQueue = new ArrayBlockingQueue<>(
                 job.getQueueSize() > 0 ? job.getQueueSize() : 10);
@@ -193,12 +197,45 @@ public class Tool implements Runnable, AutoCloseable {
         }
     }
     
+    private ExecuteQuerySettings getMainQuerySettings() {
+        ExecuteQuerySettings.Builder settings = ExecuteQuerySettings.newBuilder();
+        if (job.getTimeoutMainQuery() > 0L) {
+            settings = settings
+                    .withRequestTimeout(job.getTimeoutMainQuery(), TimeUnit.MILLISECONDS);
+        }
+        return settings.build();
+    }
+
+    private ExecuteQuerySettings getPageQuerySettings() {
+        ExecuteQuerySettings.Builder settings = ExecuteQuerySettings.newBuilder();
+        if (job.getTimeoutPageQuery() > 0L) {
+            settings = settings
+                    .withRequestTimeout(job.getTimeoutPageQuery(), TimeUnit.MILLISECONDS);
+        }
+        return settings.build();
+    }
+
+    private ExecuteQuerySettings getDetailsQuerySettings() {
+        ExecuteQuerySettings.Builder settings = ExecuteQuerySettings.newBuilder();
+        if (job.getTimeoutDetailsQuery() > 0L) {
+            settings = settings
+                    .withRequestTimeout(job.getTimeoutDetailsQuery(), TimeUnit.MILLISECONDS);
+        }
+        return settings.build();
+    }
+    
     private void mainPagedRead() {
         LOG.info("Performing paged reads for the main query.");
 
+        ExecuteQuerySettings pageSettings = getPageQuerySettings();
+
         QueryReader result = retryCtx.supplyResult(
                 session -> QueryReader.readFrom(
-                        session.createQuery(job.getMainQuery(), getIsolation()))
+                        session.createQuery(
+                                job.getMainQuery(),
+                                getIsolation(),
+                                Params.empty(),
+                                getMainQuerySettings()))
         ).join().getValue();
 
         while (shouldRun.get()) {
@@ -219,7 +256,11 @@ public class Tool implements Runnable, AutoCloseable {
             Params params = Params.of("$input", input);
             result = retryCtx.supplyResult(
                     session -> QueryReader.readFrom(
-                            session.createQuery(job.getPageQuery(), getIsolation(), params))
+                            session.createQuery(
+                                    job.getPageQuery(),
+                                    getIsolation(),
+                                    params,
+                                    pageSettings))
             ).join().getValue();
         }
     }
@@ -239,7 +280,12 @@ public class Tool implements Runnable, AutoCloseable {
     private void mainSingleRead() {
         LOG.info("Performing single-action read for the main query.");
         try (QuerySession qs = yc.createQuerySession()) {
-            qs.createQuery(job.getMainQuery(), getIsolation())
+            qs.createQuery(
+                    job.getMainQuery(),
+                    getIsolation(),
+                    Params.empty(),
+                    getMainQuerySettings()
+            )
                     .execute(part -> submitMainPart(part))
                     .join()
                     .getStatus()
@@ -332,7 +378,11 @@ public class Tool implements Runnable, AutoCloseable {
         Params params = Params.of("$input", ListValue.of(input));
         QueryReader result = retryCtx.supplyResult(
                 session -> QueryReader.readFrom(
-                        session.createQuery(query, getIsolation(), params))
+                        session.createQuery(
+                                query,
+                                getIsolation(),
+                                params,
+                                getDetailsQuerySettings()))
         ).join().getValue();
         pushDetailsToOutput(result);
     }

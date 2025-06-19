@@ -26,7 +26,11 @@ public class JobDef implements Serializable {
     private Format outputFormat = Format.CSV;
     private String outputFile = "-"; // stdout
     private String outputEncoding = null;
-    
+
+    private long timeoutMainQuery = -1L;
+    private long timeoutPageQuery = -1L;
+    private long timeoutDetailsQuery = -1L;
+
     public JobDef() {
     }
 
@@ -125,6 +129,30 @@ public class JobDef implements Serializable {
         this.outputEncoding = outputEncoding;
     }
 
+    public long getTimeoutMainQuery() {
+        return timeoutMainQuery;
+    }
+
+    public void setTimeoutMainQuery(long timeoutMainQuery) {
+        this.timeoutMainQuery = timeoutMainQuery;
+    }
+
+    public long getTimeoutPageQuery() {
+        return timeoutPageQuery;
+    }
+
+    public void setTimeoutPageQuery(long timeoutPageQuery) {
+        this.timeoutPageQuery = timeoutPageQuery;
+    }
+
+    public long getTimeoutDetailsQuery() {
+        return timeoutDetailsQuery;
+    }
+
+    public void setTimeoutDetailsQuery(long timeoutDetailsQuery) {
+        this.timeoutDetailsQuery = timeoutDetailsQuery;
+    }
+
     public static JobDef fromXml(String fname) throws IOException {
         return fromXml(JdomHelper.readDocument(fname));
     }
@@ -188,12 +216,21 @@ public class JobDef implements Serializable {
         if (el!=null) {
             job.setOutputEncoding(JdomHelper.getText(el));
         }
-        job.setMainQuery(JdomHelper.getText(docRoot, "query-main"));
+
+        el = JdomHelper.getOneChild(docRoot, "query-main");
+        job.setMainQuery(JdomHelper.getText(el));
+        job.setTimeoutMainQuery(JdomHelper.getLong(el, "timeout", -1L));
+
         Element elPageQuery = JdomHelper.getOneChild(docRoot, "query-page");
         if (elPageQuery != null) {
             job.setPageQuery(JdomHelper.getText(elPageQuery));
+            job.setTimeoutMainQuery(JdomHelper.getLong(elPageQuery, "timeout", -1L));
         }
-        job.setDetailsQuery(JdomHelper.getText(docRoot, "query-details"));
+
+        el = JdomHelper.getOneChild(docRoot, "query-details");
+        job.setDetailsQuery(JdomHelper.getText(el));
+        job.setTimeoutDetailsQuery(JdomHelper.getLong(el, "timeout", -1L));
+
         el = JdomHelper.getOneChild(docRoot, "input-page");
         if (el!=null) {
             JdomHelper.getSomeChildren(el, "column-name")
@@ -210,6 +247,10 @@ public class JobDef implements Serializable {
         if (job.getDetailsInput().isEmpty()) {
             throw JdomHelper.raise(docRoot, "Missing input columns for details query");
         }
+        job.setTimeoutPageQuery(
+                JdomHelper.getLong(docRoot, "timeout-page", -1L));
+        job.setTimeoutDetailsQuery(
+                JdomHelper.getLong(docRoot, "timeout-details", -1L));
         return job;
     }
     
