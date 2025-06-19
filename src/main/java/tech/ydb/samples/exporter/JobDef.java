@@ -224,7 +224,7 @@ public class JobDef implements Serializable {
         Element elPageQuery = JdomHelper.getOneChild(docRoot, "query-page");
         if (elPageQuery != null) {
             job.setPageQuery(JdomHelper.getText(elPageQuery));
-            job.setTimeoutMainQuery(JdomHelper.getLong(elPageQuery, "timeout", -1L));
+            job.setTimeoutPageQuery(JdomHelper.getLong(elPageQuery, "timeout", -1L));
         }
 
         el = JdomHelper.getOneChild(docRoot, "query-details");
@@ -247,10 +247,6 @@ public class JobDef implements Serializable {
         if (job.getDetailsInput().isEmpty()) {
             throw JdomHelper.raise(docRoot, "Missing input columns for details query");
         }
-        job.setTimeoutPageQuery(
-                JdomHelper.getLong(docRoot, "timeout-page", -1L));
-        job.setTimeoutDetailsQuery(
-                JdomHelper.getLong(docRoot, "timeout-details", -1L));
         return job;
     }
     
