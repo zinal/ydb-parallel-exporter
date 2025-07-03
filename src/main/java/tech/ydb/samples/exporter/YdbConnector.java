@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.util.Properties;
 import tech.ydb.auth.iam.CloudAuthHelper;
 import tech.ydb.core.auth.StaticCredentials;
+import tech.ydb.core.grpc.BalancingSettings;
 import tech.ydb.core.grpc.GrpcTransport;
 import tech.ydb.core.grpc.GrpcTransportBuilder;
 import tech.ydb.query.QueryClient;
@@ -62,6 +63,9 @@ public class YdbConnector implements AutoCloseable {
                 throw new RuntimeException("Failed to read file " + tlsCertFile, ix);
             }
             builder.withSecureConnection(cert);
+        }
+        if (config.isPreferLocalDc()) {
+            builder = builder.withBalancingSettings(BalancingSettings.detectLocalDs());
         }
 
         GrpcTransport tempTransport = builder.build();
@@ -164,6 +168,7 @@ public class YdbConnector implements AutoCloseable {
         private String staticPassword;
         private String tlsCertificateFile;
         private int poolSize = 2 * (1 + Runtime.getRuntime().availableProcessors());
+        private boolean preferLocalDc = false;
         private final String prefix;
         private final Properties properties = new Properties();
 
@@ -186,6 +191,8 @@ public class YdbConnector implements AutoCloseable {
             this.staticLogin = props.getProperty(prefix + "auth.username");
             this.staticPassword = props.getProperty(prefix + "auth.password");
             this.tlsCertificateFile = props.getProperty(prefix + "cafile");
+            this.preferLocalDc = Boolean.parseBoolean(
+                    props.getProperty(prefix + "preferLocalDc", "false"));
             String spool = props.getProperty(prefix + "poolSize");
             if (spool != null && spool.length() > 0) {
                 poolSize = Integer.parseInt(spool);
@@ -295,6 +302,14 @@ public class YdbConnector implements AutoCloseable {
                 poolSize = 2 * (1 + Runtime.getRuntime().availableProcessors());
             }
             this.poolSize = poolSize;
+        }
+
+        public boolean isPreferLocalDc() {
+            return preferLocalDc;
+        }
+
+        public void setPreferLocalDc(boolean preferLocalDc) {
+            this.preferLocalDc = preferLocalDc;
         }
 
         public Properties getProperties() {

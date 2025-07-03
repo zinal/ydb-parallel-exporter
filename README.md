@@ -53,12 +53,13 @@ Connection parameters are provided either programmatically (as `java.util.Proper
 
 | **Parameter** | **Description** |
 | --- | --- |
-| ydb.url | YDB connection URL |
-| ydb.cafile | Path to the custom CA certificate file |
-| ydb.auth.mode | [Authentication mode](https://ydb.tech/docs/en/reference/ydb-sdk/auth#auth-provider) (NONE, ENV, STATIC, METADATA, SAKEY) |
-| ydb.auth.username | Username for STATIC authentication |
-| ydb.auth.password | Password for STATIC authentication |
-| ydb.auth.sakey | Service account key file name for SAKEY authentication |
+| `ydb.url` | YDB connection URL |
+| `ydb.cafile` | Path to the custom CA certificate file |
+| `ydb.auth.mode` | [Authentication mode](https://ydb.tech/docs/en/reference/ydb-sdk/auth#auth-provider) (NONE, ENV, STATIC, METADATA, SAKEY) |
+| `ydb.auth.username` | Username for STATIC authentication |
+| `ydb.auth.password` | Password for STATIC authentication |
+| `ydb.auth.sakey` | Service account key file name for SAKEY authentication |
+| `ydb.preferLocalDc` | Prefer local or nearest datacenter for connections (true or false, default false) |
 
 Example properies file:
 
@@ -81,19 +82,20 @@ Processing parameters are provieded either programmatically (as `tech.ydb.sample
 
 | **Parameter** | **Description** |
 | --- | --- |
-| worker-count | Number of parallel workers |
-| queue-size | Size of the queue between the main query and the detail query |
-| batch-limit | Maximum number of keys in a batch for details query |
-| output-format | Output format (CSV, TSV, JSON) |
-| output-file | Output file name, with value '-' for STDOUT |
-| isolation | Transaction isolation level (SERIALIZABLE_RW, SNAPSHOT_RO, STALE_RO, ONLINE_RO, ONLINE_INCONSISTENT_RO) |
-| query-main | Main query (executed first) |
-| query-page | Paging query (optional). Requires key sorting and row count limit both for itself and for the main query. |
-| query-detail | Detail query. Takes the keys from main and page queries, and applies extra logic. |
-| input-page | List of input columns for the page query (subset of columns from main and page queries) |
-| input-detail | List of input columns for the detail query (subset of columns from main and page queries) |
-| output-page | List of output columns for the page query |
-| output-detail | List of output columns for the detail query |
+| `worker-count` | Number of parallel workers |
+| `queue-size` | Size of the queue between the main query and the detail query |
+| `batch-limit` | Maximum number of keys in a batch for details query |
+| `output-format` | Output format (CSV, TSV, JSON) |
+| `output-file` | Output file name, with value '-' for STDOUT |
+| `isolation` | Transaction isolation level (SERIALIZABLE_RW, SNAPSHOT_RO, STALE_RO, ONLINE_RO, ONLINE_INCONSISTENT_RO) |
+| `timeout` | Query timeout, in milliseconds, for query-main, query-page or query-detail, default -1 (unlimited) |
+| `query-main` | Main query (executed first) |
+| `query-page` | Paging query (optional). Requires key sorting and row count limit both for itself and for the main query. |
+| `query-detail` | Detail query. Takes the keys from main and page queries, and applies extra logic. |
+| `input-page` | List of input columns for the page query (subset of columns from main and page queries) |
+| `input-detail` | List of input columns for the detail query (subset of columns from main and page queries) |
+| `output-page` | List of output columns for the page query |
+| `output-detail` | List of output columns for the detail query |
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -104,7 +106,7 @@ Processing parameters are provieded either programmatically (as `tech.ydb.sample
     <output-format>CSV</output-format>
     <output-file>example1.csv</output-file>
     <isolation>SNAPSHOT_RO</isolation>
-    <query-main><![CDATA[
+    <query-main timeout="3000"><![CDATA[
 SELECT sys_update_tv, id
 FROM my_documents VIEW ix_sys_update_tv
 WHERE sys_update_tv >= Timestamp('2021-01-01T00:00:00Z')
@@ -118,7 +120,7 @@ LIMIT 1000;   -- Mandatory limit on the number of output records
         <column-name>sys_update_tv</column-name>
         <column-name>id</column-name>
     </input-page>
-    <query-page><![CDATA[
+    <query-page timeout="3000"><![CDATA[
 DECLARE $input AS Struct<sys_update_tv:Timestamp?, id:Text>;
 SELECT sys_update_tv, id
 FROM my_documents VIEW ix_sys_update_tv
@@ -127,7 +129,7 @@ WHERE (sys_update_tv, id) > ($input.sys_update_tv, $input.id) -- Paging conditio
 ORDER BY sys_update_tv, id   -- Mandatory sorting on primary key or secondary index
 LIMIT 1000;   -- Mandatory limit on the number of output records
 ]]> </query-page>
-    <input-details>
+    <input-details timeout="10000">
         <column-name>id</column-name>
     </input-details>
     <query-details><![CDATA[
