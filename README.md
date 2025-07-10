@@ -159,7 +159,7 @@ Substitutions are applied after parsing the XML content (so the file needs to be
 
 The variables can be specified as `${varname}` in attribute values, text values and CDATA section values, but not in the tag names or attribute names.
 
-Example properies file containing some sobstitution variables:
+Example properies file containing some substitution variables:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -170,4 +170,197 @@ Example properies file containing some sobstitution variables:
 <entry key="start_time">2020-01-01T00:00:00Z</entry>
 <entry key="finish_time">2026-01-01T00:00:00Z</entry>
 </properties>
+```
+
+## Usage examples
+
+The YDB parallel exporter tool can be used for various data processing tasks. Below are examples for common use cases:
+
+### 1. Filling a new column with computed data
+
+This example shows how to fill a new column in a table with data computed from other columns using SQL queries.
+
+Suppose that the table `some_table` has got a new column called `new_field` using the following statement:
+
+```SQL
+ALTER TABLE some_table ADD COLUMN new_field Text;
+```
+
+The `new_field` column contains just nulls, and there is a requirement that it should be filled with some data computed from the other fields (and possibly by requesting the data from other tables as well).
+
+**Job definition file (`fill-column.xml`):**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<ydb-parallel-exporter>
+    <worker-count>10</worker-count>
+    <queue-size>100</queue-size>
+    <batch-limit>1000</batch-limit>
+    <output-format>TSV</output-format>
+    <output-file>-</output-file>
+    <isolation>SERIALIZABLE_RW</isolation>
+
+    <!-- Select records that need the new column filled -->
+    <query-main timeout="120000"><![CDATA[
+SELECT id FROM some_table
+WHERE new_field IS NULL
+ORDER BY id;
+]]> </query-main>
+
+    <input-details>
+        <column-name>id</column-name>
+    </input-details>
+
+    <!-- Update the new column with computed data -->
+    <query-details timeout="10000"><![CDATA[
+DECLARE $input AS List<Struct<id:Text>>;
+UPSERT INTO some_table
+  SELECT i.id AS id,
+      t.old_field || ' 'u || a.some_name AS new_field
+  FROM AS_TABLE($input) AS i
+  JOIN some_table AS t
+    ON t.id = i.id
+  LEFT JOIN another_table AS a
+    ON a.id = t.ref_a;
+]]> </query-details>
+</ydb-parallel-exporter>
+```
+
+**Execution:**
+```bash
+./Run.sh connection.xml fill-column.xml
+```
+
+### 2. Archiving old records to another table
+
+This example demonstrates archiving older records to an archive table and then deleting them from the original table.
+
+Suppose that the original table `documents` has to be cleared every month from the documents older that 3 months.
+The old documents should be put into the `documents_archive` table, and deleted from the original `documents` table.
+
+**Job definition file (`archive-records.xml`):**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<ydb-parallel-exporter>
+    <worker-count>5</worker-count>
+    <queue-size>100</queue-size>
+    <batch-limit>1000</batch-limit>
+    <output-format>TSV</output-format>
+    <output-file>-</output-file>
+    <isolation>SERIALIZABLE_RW</isolation>
+
+    <!-- Select records to archive (older than 1 year) -->
+    <query-main timeout="120000"><![CDATA[
+SELECT id FROM documents
+WHERE created_date < CurrentUtcTimestamp() - Interval('P92D');
+]]> </query-main>
+
+    <input-details>
+        <column-name>id</column-name>
+    </input-details>
+
+    <!-- Archive records and then delete from original table -->
+    <query-details timeout="10000"><![CDATA[
+DECLARE $input AS List<Struct<id:Text>>;
+
+-- First, insert into archive table
+UPSERT INTO documents_archive
+SELECT d.*
+FROM AS_TABLE($input) AS i
+JOIN documents AS d ON d.id = i.id;
+
+-- Then, delete from original table
+DELETE FROM documents
+ON SELECT * FROM AS_TABLE($input);
+]]> </query-details>
+</ydb-parallel-exporter>
+```
+
+**Execution:**
+```bash
+./Run.sh connection.xml archive-records.xml
+```
+
+### 3. Extracting large amounts of data to CSV files
+
+This example shows how to extract large datasets to CSV files with parallel processing and paging for better performance.
+
+Suppose that there is a huge amount of data stored in the normalized table structure, and the BI system needs the de-normalized data to fill the data mart. Every day a job is run to extract the last two days' data into the CSV file in the form of a wide table, containing all the required attritutes to fill the data mart. The file is then loaded into the BI system using its native tools.
+
+Job parameters are put into the separate substitution variables file, which is re-generated every time before job run.
+
+**Job substitution variable file (`export-to-csv_params.xml`):**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<properties>
+<entry key="file_name">exported_data.csv</entry>
+<entry key="worker_count">10</entry>
+<entry key="start_time">2020-01-01T00:00:00Z</entry>
+<entry key="finish_time">2026-01-01T00:00:00Z</entry>
+</properties>
+```
+
+**Job definition file (`export-to-csv.xml`):**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<ydb-parallel-exporter>
+    <worker-count>${worker_count}</worker-count>
+    <queue-size>100</queue-size>
+    <batch-limit>1000</batch-limit>
+    <output-format>CSV</output-format>
+    <output-file>${file_name}</output-file>
+    <output-encoding>UTF-8</output-encoding>
+    <isolation>SNAPSHOT_RO</isolation>
+
+    <!-- Main query with paging for large datasets -->
+    <query-main timeout="5000"><![CDATA[
+SELECT sys_update_tv, id
+FROM my_documents VIEW ix_sys_update_tv
+WHERE sys_update_tv >= Timestamp('${start_time}')
+  AND sys_update_tv < Timestamp('${finish_time}')
+ORDER BY sys_update_tv, id
+LIMIT 1000;
+]]> </query-main>
+
+    <!-- Paging query for handling large datasets -->
+    <input-page>
+        <column-name>sys_update_tv</column-name>
+        <column-name>id</column-name>
+    </input-page>
+    <query-page timeout="5000"><![CDATA[
+DECLARE $input AS Struct<sys_update_tv:Timestamp?, id:Text>;
+SELECT sys_update_tv, id
+FROM my_documents VIEW ix_sys_update_tv
+WHERE (sys_update_tv, id) > ($input.sys_update_tv, $input.id)
+  AND sys_update_tv < Timestamp('${finish_time}')
+ORDER BY sys_update_tv, id
+LIMIT 1000;
+]]> </query-page>
+
+    <!-- Detail query with joins for enriched data and extra filters -->
+    <input-details>
+        <column-name>id</column-name>
+    </input-details>
+    <query-details timeout="5000"><![CDATA[
+DECLARE $input AS List<Struct<id:Text>>;
+SELECT
+    documents.*,
+    d1.attr1 AS d1_attr1,
+    d2.attr1 AS d2_attr1
+FROM AS_TABLE($input) AS input
+INNER JOIN my_documents VIEW PRIMARY KEY AS documents
+  ON input.id=documents.id
+LEFT JOIN my_dict1 AS d1
+  ON d1.key=documents.dict1
+LEFT JOIN my_dict2 AS d2
+  ON d2.key=documents.dict2
+WHERE documents.some_state IN ('ONE'u, 'TWO'u, 'THREE'u, 'FOUR'u)
+  AND documents.input_tv IS NOT NULL;
+]]> </query-details>
+</ydb-parallel-exporter>
+```
+
+**Execution:**
+```bash
+./Run.sh connection.xml export-to-csv.xml export-to-csv_params.xml
 ```
